@@ -1,10 +1,12 @@
 {
-  "lastRunTime": "2025-07-28T06:38:50.8690465Z",
+  "lastRunTime": "2025-07-28T06:43:47.0276414Z",
   "completedLocations": [
-    "Taiwan"
+    "Taiwan",
+    "Taipei",
+    "New Taipei"
   ],
   "failedLocations": [],
-  "totalUsersFound": 30,
+  "totalUsersFound": 61,
   "isCompleted": false,
   "lastError": null,
   "rateLimitResetTime": null,

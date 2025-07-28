@@ -510,8 +510,8 @@ namespace TaiwanGitHubPopularUsers.Services
 
                 if (organizations != null && organizations.Count > 0)
                 {
-                    // 限制只檢查前3個組織以減少API請求
-                    foreach (var org in organizations.Take(3))
+                    // 限制只檢查前10個組織以減少API請求
+                    foreach (var org in organizations.Take(10))
                     {
                         var orgRepos = await GetOrganizationTopRepositoriesAsync(org.Login);
                         
