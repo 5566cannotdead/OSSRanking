@@ -66,11 +66,11 @@ await progressService.SaveProgressAsync(progress);
 
 程序會輸出詳細的 API 請求計數信息：
 ```
-📊 本次運行 API 請求限制: 50
-📈 API 請求計數: 1/50
-📈 API 請求計數: 2/50
+📊 本次運行 API 請求限制: 100
+📈 API 請求計數: 1/100
+📈 API 請求計數: 2/100
 ...
-⚠️  已達到本次運行的 API 請求限制 (50)
+⚠️  已達到本次運行的 API 請求限制 (100)
 ```
 
 這可以幫助您：

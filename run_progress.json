@@ -1,0 +1,35 @@
+{
+  "lastRunTime": "2025-07-28T07:37:18.9258799Z",
+  "completedLocations": [
+    "Taiwan",
+    "Taipei"
+  ],
+  "failedLocations": [
+    "New Taipei",
+    "Taoyuan",
+    "Taichung",
+    "Tainan",
+    "Kaohsiung",
+    "Hsinchu",
+    "Keelung",
+    "Chiayi",
+    "Changhua",
+    "Yunlin",
+    "Nantou",
+    "Pingtung",
+    "Yilan",
+    "Hualien",
+    "Taitung",
+    "Penghu",
+    "Kinmen",
+    "Matsu"
+  ],
+  "totalUsersFound": 259,
+  "isCompleted": true,
+  "lastError": "Matsu: No such host is known. (api.github.com:443)",
+  "rateLimitResetTime": null,
+  "encounteredRateLimit": false,
+  "apiRequestCount": 23,
+  "maxApiRequestsPerRun": 100,
+  "reachedApiLimit": false
+}
