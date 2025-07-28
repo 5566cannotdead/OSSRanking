@@ -77,8 +77,9 @@ namespace TaiwanGitHubPopularUsers.Services
                     
                     var totalInfluence = user.Followers + personalStars + personalForks + contributedStars + contributedForks;
 
-                    // 用戶鏈接和頭像
-                    var userLink = $"[![{user.Login}]({user.AvatarUrl}&s=40)]({user.HtmlUrl})";
+                    // 用戶鏈接和頭像 - 統一小格式
+                    var userAvatar = $"<img src=\"{user.AvatarUrl}&s=32\" width=\"32\" height=\"32\" style=\"border-radius: 50%;\" />";
+                    var userLink = $"[{userAvatar}]({user.HtmlUrl})";
                     var userInfo = $"**[{user.Login}]({user.HtmlUrl})**";
                     if (!string.IsNullOrEmpty(user.Name))
                     {

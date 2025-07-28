@@ -575,7 +575,7 @@ namespace TaiwanGitHubPopularUsers
                     Console.WriteLine($"   📊 批次完成: 處理了 {batchProcessed}/{batch.Count} 位用戶，使用了約 {batchApiRequests} 個 API 請求");
                     
                     // 批次間保存進度
-                    if (batchProcessed > 0)
+                    if (batchProcessed > 0)N
                     {
                         Console.WriteLine("   💾 保存進度...");
                         await userDataService.SaveUsersAsync(users);
