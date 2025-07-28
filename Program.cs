@@ -81,6 +81,13 @@ namespace TaiwanGitHubPopularUsers
                         Console.WriteLine("📊 顯示現有數據摘要");
                         var existingUsers = await userDataService.LoadExistingUsersAsync();
                         userDataService.PrintUserSummary(existingUsers);
+                        
+                        // 即使不重新搜尋，也執行自動專案豐富化
+                        Console.WriteLine("\n🔄 自動開始為用戶添加專案信息...");
+                        await AutoEnrichAllUsersAsync();
+                        
+                        Console.WriteLine($"\n✅ 程序執行完成！");
+                        Console.WriteLine($"結束時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                         Console.WriteLine("\n按任意鍵退出...");
                         Console.ReadKey();
                         return;
@@ -166,6 +173,19 @@ namespace TaiwanGitHubPopularUsers
                     userDataService.PrintUserSummary(allUsers);
                 }
 
+                // 檢查是否需要自動執行專案豐富化
+                Console.WriteLine($"\n✅ 用戶搜尋完成！");
+                
+                // 檢查進度是否完成，如果完成則自動執行專案豐富化
+                var currentProgress = await progressService.LoadProgressAsync();
+                if (currentProgress.IsCompleted)
+                {
+                    Console.WriteLine("\n🎉 所有地區搜尋已完成！");
+                    Console.WriteLine("🔄 自動開始為用戶添加專案信息...");
+                    
+                    await AutoEnrichAllUsersAsync();
+                }
+                
                 Console.WriteLine($"\n✅ 程序執行完成！");
                 Console.WriteLine($"結束時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             }
@@ -308,10 +328,26 @@ namespace TaiwanGitHubPopularUsers
                 }
                 
                 Console.WriteLine($"\n🔄 即將為 {usersWithoutProjects.Count} 位用戶添加專案信息");
-                Console.WriteLine("⚠️  注意: 每位用戶需要約 3-5 個 API 請求，本次運行最多 50 個請求");
+                Console.WriteLine("⚠️  注意: 每位用戶需要約 3-5 個 API 請求");
                 
-                var maxUsersToProcess = Math.Min(usersWithoutProjects.Count, 15); // 每個用戶約 3-4 個請求
-                Console.WriteLine($"📊 本次運行將處理前 {maxUsersToProcess} 位用戶");
+                Console.WriteLine("\n請選擇處理模式:");
+                Console.WriteLine("1. 小批次模式 (處理前 15 位用戶，適合測試)");
+                Console.WriteLine("2. 完整模式 (處理所有用戶，分批進行)");
+                Console.Write("請選擇 (1 或 2): ");
+                
+                var modeChoice = Console.ReadLine();
+                int maxUsersToProcess;
+                
+                if (modeChoice == "2")
+                {
+                    maxUsersToProcess = usersWithoutProjects.Count;
+                    Console.WriteLine($"📊 完整模式: 將分批處理所有 {maxUsersToProcess} 位用戶");
+                }
+                else
+                {
+                    maxUsersToProcess = Math.Min(usersWithoutProjects.Count, 15);
+                    Console.WriteLine($"📊 小批次模式: 將處理前 {maxUsersToProcess} 位用戶");
+                }
                 
                 Console.Write("是否繼續？(Y/n): ");
                 var input = Console.ReadLine()?.ToLower();
@@ -413,6 +449,156 @@ namespace TaiwanGitHubPopularUsers
             
             Console.WriteLine("\n按任意鍵退出...");
             Console.ReadKey();
+        }
+
+        /// <summary>
+        /// 自動為所有用戶執行專案豐富化
+        /// </summary>
+        private static async Task AutoEnrichAllUsersAsync()
+        {
+            try
+            {
+                var userDataService = new UserDataService();
+                
+                Console.WriteLine("\n📂 === 自動專案豐富化 ===");
+                Console.WriteLine("正在為所有用戶添加主要貢獻專案信息...");
+                
+                var users = await userDataService.LoadExistingUsersAsync();
+                
+                if (users.Count == 0)
+                {
+                    Console.WriteLine("❌ 沒有找到用戶數據");
+                    return;
+                }
+
+                // 檢查需要豐富化的用戶
+                var usersWithoutProjects = users.Where(u => u.Projects == null || u.Projects.Count == 0).ToList();
+                
+                Console.WriteLine($"📊 數據統計:");
+                Console.WriteLine($"   - 總用戶數: {users.Count}");
+                Console.WriteLine($"   - 需要添加專案信息: {usersWithoutProjects.Count} 位用戶");
+                
+                if (usersWithoutProjects.Count == 0)
+                {
+                    Console.WriteLine("🎉 所有用戶都已經有專案信息！");
+                    return;
+                }
+                
+                using var userProjectService = new UserProjectService(GITHUB_TOKEN);
+                
+                var processedCount = 0;
+                var totalApiRequests = 0;
+                var batchSize = 10; // 每批處理 10 個用戶
+                var maxApiRequestsPerBatch = 40; // 每批最多 40 個 API 請求
+                
+                Console.WriteLine($"\n🚀 開始批次處理，每批 {batchSize} 位用戶...");
+                
+                for (int i = 0; i < usersWithoutProjects.Count; i += batchSize)
+                {
+                    var batch = usersWithoutProjects.Skip(i).Take(batchSize).ToList();
+                    var batchNumber = (i / batchSize) + 1;
+                    var totalBatches = (int)Math.Ceiling((double)usersWithoutProjects.Count / batchSize);
+                    
+                    Console.WriteLine($"\n📦 處理第 {batchNumber}/{totalBatches} 批 ({batch.Count} 位用戶)");
+                    
+                    var batchApiRequests = 0;
+                    var batchProcessed = 0;
+                    
+                    foreach (var user in batch)
+                    {
+                        try
+                        {
+                            Console.WriteLine($"   [{batchProcessed + 1}/{batch.Count}] 處理用戶: {user.Login}");
+                            
+                            var result = await userProjectService.EnrichUserWithProjectsAsync(user);
+                            
+                            if (result.Success)
+                            {
+                                batchApiRequests += 4; // 每個用戶約 4 個 API 請求
+                                batchProcessed++;
+                                processedCount++;
+                                
+                                Console.WriteLine($"      ✅ 找到 {user.Projects?.Count ?? 0} 個主要專案");
+                                Console.WriteLine($"      ⭐ 總計: {user.TotalStars} stars, {user.TotalForks} forks");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"      ❌ 錯誤: {result.ErrorMessage}");
+                                
+                                if (result.IsRateLimited)
+                                {
+                                    Console.WriteLine("\n🚫 遇到 GitHub API 限制，停止處理");
+                                    Console.WriteLine("💾 保存當前進度...");
+                                    await userDataService.SaveUsersAsync(users);
+                                    Console.WriteLine("✅ 進度已保存，可稍後重新運行 --enrich 繼續處理");
+                                    return;
+                                }
+                                
+                                batchApiRequests += 2; // 錯誤時也可能消耗部分請求
+                            }
+                            
+                            // 檢查批次 API 限制
+                            if (batchApiRequests >= maxApiRequestsPerBatch)
+                            {
+                                Console.WriteLine($"      ⚠️  批次 API 請求達到限制 ({maxApiRequestsPerBatch})");
+                                break;
+                            }
+                            
+                            // 請求間延遲
+                            await Task.Delay(800);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"      ❌ 處理 {user.Login} 時發生異常: {ex.Message}");
+                            batchApiRequests += 1;
+                        }
+                    }
+                    
+                    totalApiRequests += batchApiRequests;
+                    
+                    Console.WriteLine($"   📊 批次完成: 處理了 {batchProcessed}/{batch.Count} 位用戶，使用了約 {batchApiRequests} 個 API 請求");
+                    
+                    // 批次間保存進度
+                    if (batchProcessed > 0)
+                    {
+                        Console.WriteLine("   💾 保存進度...");
+                        await userDataService.SaveUsersAsync(users);
+                    }
+                    
+                    // 批次間延遲
+                    if (i + batchSize < usersWithoutProjects.Count)
+                    {
+                        Console.WriteLine("   ⏱️  批次間休息 3 秒...");
+                        await Task.Delay(3000);
+                    }
+                }
+                
+                Console.WriteLine($"\n✅ 自動專案豐富化完成！");
+                Console.WriteLine($"📊 處理統計:");
+                Console.WriteLine($"   - 成功處理: {processedCount}/{usersWithoutProjects.Count} 位用戶");
+                Console.WriteLine($"   - 總 API 請求: 約 {totalApiRequests} 次");
+                
+                // 最終保存
+                await userDataService.SaveUsersAsync(users);
+                
+                // 顯示最終統計
+                var finalUsersWithProjects = users.Where(u => u.Projects != null && u.Projects.Count > 0).ToList();
+                Console.WriteLine($"\n📈 最終統計:");
+                Console.WriteLine($"   - 已有專案信息: {finalUsersWithProjects.Count}/{users.Count} 位用戶");
+                Console.WriteLine($"   - 總計 Stars: {finalUsersWithProjects.Sum(u => u.TotalStars):N0}");
+                Console.WriteLine($"   - 總計 Forks: {finalUsersWithProjects.Sum(u => u.TotalForks):N0}");
+                
+                if (usersWithoutProjects.Count - processedCount > 0)
+                {
+                    Console.WriteLine($"\n💡 提示: 還有 {usersWithoutProjects.Count - processedCount} 位用戶待處理");
+                    Console.WriteLine("可運行 'dotnet run --enrich' 繼續處理");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 自動專案豐富化執行錯誤: {ex.Message}");
+                Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
+            }
         }
     }
 }

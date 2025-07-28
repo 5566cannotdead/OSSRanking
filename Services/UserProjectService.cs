@@ -8,6 +8,7 @@ namespace TaiwanGitHubPopularUsers.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _token;
+        private const string ApiLimitMessage = "API 限制已達到";
 
         public UserProjectService(string token)
         {
@@ -24,10 +25,9 @@ namespace TaiwanGitHubPopularUsers.Services
             {
                 Console.WriteLine($"📂 正在獲取 {user.Login} 的專案信息...");
 
-                // 1. 獲取用戶自己的倉庫（按 stars 排序）
-                var ownRepos = await GetUserRepositoriesAsync(user.Login);
+                // 1. 獲取用戶所有個人倉庫
+                var ownRepos = await GetAllUserRepositoriesAsync(user.Login);
                 
-                // 如果遇到 API 限制，立即返回
                 if (!ownRepos.Success && ownRepos.IsRateLimited)
                 {
                     Console.WriteLine($"   🚫 獲取 {user.Login} 的倉庫時遇到 API 限制，停止後續處理");
@@ -39,13 +39,12 @@ namespace TaiwanGitHubPopularUsers.Services
                     };
                 }
                 
-                // 2. 獲取用戶貢獻的組織倉庫
-                var contributedRepos = await GetUserContributedRepositoriesAsync(user.Login);
+                // 2. 獲取用戶在貢獻專案中排名前三的專案
+                var topContributedRepos = await GetUserTopContributedRepositoriesAsync(user.Login);
                 
-                // 如果遇到 API 限制，立即返回
-                if (!contributedRepos.Success && contributedRepos.IsRateLimited)
+                if (!topContributedRepos.Success && topContributedRepos.IsRateLimited)
                 {
-                    Console.WriteLine($"   🚫 獲取 {user.Login} 的組織貢獻時遇到 API 限制，停止後續處理");
+                    Console.WriteLine($"   🚫 獲取 {user.Login} 的貢獻專案時遇到 API 限制，停止後續處理");
                     return new ApiResponse<bool>
                     {
                         Success = false,
@@ -54,30 +53,34 @@ namespace TaiwanGitHubPopularUsers.Services
                     };
                 }
 
-                // 3. 合併並選擇前三個最有影響力的專案
+                // 3. 合併所有符合條件的專案
                 var allProjects = new List<UserProject>();
                 
+                // 添加所有個人專案
                 if (ownRepos.Success && ownRepos.Data != null)
                 {
                     allProjects.AddRange(ownRepos.Data);
+                    Console.WriteLine($"   📊 個人專案: {ownRepos.Data.Count} 個");
                 }
                 
-                if (contributedRepos.Success && contributedRepos.Data != null)
+                // 添加排名前三的貢獻專案
+                if (topContributedRepos.Success && topContributedRepos.Data != null)
                 {
-                    allProjects.AddRange(contributedRepos.Data);
+                    allProjects.AddRange(topContributedRepos.Data);
+                    Console.WriteLine($"   🏆 前三貢獻專案: {topContributedRepos.Data.Count} 個");
                 }
 
-                // 按 Stars 排序並取前三名
+                // 按 Stars 排序並取前五名作為展示
                 user.Projects = allProjects
                     .OrderByDescending(p => p.StargazersCount)
-                    .Take(3)
+                    .Take(5)
                     .ToList();
 
-                // 計算總計
-                user.TotalStars = user.Projects.Sum(p => p.StargazersCount);
-                user.TotalForks = user.Projects.Sum(p => p.ForksCount);
+                // 計算所有專案的總計（不限於展示的前五名）
+                user.TotalStars = allProjects.Sum(p => p.StargazersCount);
+                user.TotalForks = allProjects.Sum(p => p.ForksCount);
 
-                Console.WriteLine($"   ✅ {user.Login}: 找到 {user.Projects.Count} 個主要專案，總計 {user.TotalStars} stars, {user.TotalForks} forks");
+                Console.WriteLine($"   ✅ {user.Login}: 展示前 {user.Projects.Count} 個專案，總計 {user.TotalStars} stars, {user.TotalForks} forks");
 
                 return new ApiResponse<bool>
                 {
@@ -96,54 +99,85 @@ namespace TaiwanGitHubPopularUsers.Services
             }
         }
 
-        private async Task<ApiResponse<List<UserProject>>> GetUserRepositoriesAsync(string username)
+        /// <summary>
+        /// 獲取用戶所有個人倉庫
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetAllUserRepositoriesAsync(string username)
         {
             try
             {
-                var reposUrl = $"https://api.github.com/users/{username}/repos?per_page=50&sort=stars&direction=desc";
-                var response = await _httpClient.GetAsync(reposUrl);
-
-                if (response.StatusCode == HttpStatusCode.Forbidden)
+                var allProjects = new List<UserProject>();
+                var page = 1;
+                const int perPage = 100; // GitHub API 最大每頁數量
+                
+                while (true)
                 {
-                    return new ApiResponse<List<UserProject>>
+                    var url = $"https://api.github.com/users/{username}/repos?per_page={perPage}&page={page}&sort=stars&direction=desc";
+                    var httpResponse = await _httpClient.GetAsync(url);
+
+                    if (httpResponse.StatusCode == HttpStatusCode.Forbidden)
                     {
-                        Success = false,
-                        IsRateLimited = true,
-                        ErrorMessage = "API 限制已達到"
-                    };
-                }
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
-
-                    var projects = repos?.Where(r => !r.Name.StartsWith(".") && r.StargazersCount > 0)
-                        .Select(r => new UserProject
+                        return new ApiResponse<List<UserProject>>
                         {
-                            Name = r.Name,
-                            FullName = r.FullName,
-                            Description = r.Description,
-                            StargazersCount = r.StargazersCount,
-                            ForksCount = r.ForksCount,
-                            Language = r.Language,
-                            IsOwner = true,
-                            Organization = null,
-                            CreatedAt = r.CreatedAt,
-                            UpdatedAt = r.UpdatedAt
-                        }).ToList() ?? new List<UserProject>();
+                            Success = false,
+                            IsRateLimited = true,
+                            ErrorMessage = ApiLimitMessage
+                        };
+                    }
 
-                    return new ApiResponse<List<UserProject>>
+                    if (httpResponse.IsSuccessStatusCode)
                     {
-                        Success = true,
-                        Data = projects
-                    };
+                        var json = await httpResponse.Content.ReadAsStringAsync();
+                        var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
+
+                        if (repos == null || repos.Count == 0)
+                        {
+                            break; // 沒有更多倉庫
+                        }
+
+                        // 過濾並轉換為 UserProject
+                        var projects = repos.Where(r => !r.Name.StartsWith('.') && r.StargazersCount >= 0) // 包含所有星星數量，包括0
+                            .Select(r => new UserProject
+                            {
+                                Name = r.Name,
+                                FullName = r.FullName,
+                                Description = r.Description,
+                                StargazersCount = r.StargazersCount,
+                                ForksCount = r.ForksCount,
+                                Language = r.Language,
+                                IsOwner = true,
+                                Organization = null,
+                                CreatedAt = r.CreatedAt,
+                                UpdatedAt = r.UpdatedAt
+                            }).ToList();
+
+                        allProjects.AddRange(projects);
+                        
+                        // 如果返回的倉庫數量少於每頁數量，說明已經是最後一頁
+                        if (repos.Count < perPage)
+                        {
+                            break;
+                        }
+                        
+                        page++;
+                        
+                        // 避免請求過快
+                        await Task.Delay(500);
+                    }
+                    else
+                    {
+                        return new ApiResponse<List<UserProject>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP {httpResponse.StatusCode}: {httpResponse.ReasonPhrase}"
+                        };
+                    }
                 }
 
                 return new ApiResponse<List<UserProject>>
                 {
-                    Success = false,
-                    ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                    Success = true,
+                    Data = allProjects
                 };
             }
             catch (Exception ex)
@@ -156,11 +190,16 @@ namespace TaiwanGitHubPopularUsers.Services
             }
         }
 
-        private async Task<ApiResponse<List<UserProject>>> GetUserContributedRepositoriesAsync(string username)
+        /// <summary>
+        /// 獲取用戶在貢獻專案中排名前三的專案
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetUserTopContributedRepositoriesAsync(string username)
         {
             try
             {
-                // 獲取用戶所屬的組織
+                var topContributedProjects = new List<UserProject>();
+                
+                // 1. 獲取用戶所屬的組織
                 var orgsUrl = $"https://api.github.com/users/{username}/orgs";
                 var orgsResponse = await _httpClient.GetAsync(orgsUrl);
 
@@ -170,7 +209,7 @@ namespace TaiwanGitHubPopularUsers.Services
                     {
                         Success = false,
                         IsRateLimited = true,
-                        ErrorMessage = "API 限制已達到"
+                        ErrorMessage = ApiLimitMessage
                     };
                 }
 
@@ -186,46 +225,36 @@ namespace TaiwanGitHubPopularUsers.Services
                 var orgsJson = await orgsResponse.Content.ReadAsStringAsync();
                 var organizations = JsonSerializer.Deserialize<List<GitHubOrganization>>(orgsJson);
 
-                var contributedProjects = new List<UserProject>();
-
                 if (organizations != null)
                 {
-                    // 限制只檢查前 5 個組織以避免過多 API 請求
-                    foreach (var org in organizations.Take(5))
+                    // 限制只檢查前 3 個組織以避免過多 API 請求
+                    foreach (var org in organizations.Take(3))
                     {
-                        var orgRepos = await GetOrganizationTopRepositoriesAsync(org.Login);
+                        var orgTopRepos = await GetOrganizationTopRepositoriesWithContributorCheckAsync(org.Login, username);
                         
-                        // 如果遇到 API 限制，立即返回
-                        if (!orgRepos.Success && orgRepos.IsRateLimited)
+                        if (orgTopRepos.Success && orgTopRepos.Data != null)
+                        {
+                            topContributedProjects.AddRange(orgTopRepos.Data);
+                        }
+                        
+                        if (orgTopRepos.IsRateLimited)
                         {
                             return new ApiResponse<List<UserProject>>
                             {
                                 Success = false,
                                 IsRateLimited = true,
-                                ErrorMessage = "API 限制已達到"
+                                ErrorMessage = ApiLimitMessage
                             };
                         }
-                        
-                        if (orgRepos.Success && orgRepos.Data != null)
-                        {
-                            // 為組織倉庫添加組織標記
-                            foreach (var project in orgRepos.Data)
-                            {
-                                project.IsOwner = false;
-                                project.Organization = org.Login;
-                            }
-                            
-                            contributedProjects.AddRange(orgRepos.Data);
-                        }
 
-                        await Task.Delay(500); // 避免 API 限制
+                        await Task.Delay(1000); // 避免 API 限制
                     }
                 }
 
                 return new ApiResponse<List<UserProject>>
                 {
                     Success = true,
-                    Data = contributedProjects.OrderByDescending(p => p.StargazersCount).Take(10).ToList()
+                    Data = topContributedProjects.OrderByDescending(p => p.StargazersCount).Take(5).ToList()
                 };
             }
             catch (Exception ex)
@@ -238,11 +267,14 @@ namespace TaiwanGitHubPopularUsers.Services
             }
         }
 
-        private async Task<ApiResponse<List<UserProject>>> GetOrganizationTopRepositoriesAsync(string orgName)
+        /// <summary>
+        /// 獲取組織的頂級倉庫並檢查用戶是否在前三貢獻者中
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetOrganizationTopRepositoriesWithContributorCheckAsync(string orgName, string username)
         {
             try
             {
-                var reposUrl = $"https://api.github.com/orgs/{orgName}/repos?per_page=20&sort=stars&direction=desc";
+                var reposUrl = $"https://api.github.com/orgs/{orgName}/repos?per_page=10&sort=stars&direction=desc";
                 var response = await _httpClient.GetAsync(reposUrl);
 
                 if (response.StatusCode == HttpStatusCode.Forbidden)
@@ -251,39 +283,114 @@ namespace TaiwanGitHubPopularUsers.Services
                     {
                         Success = false,
                         IsRateLimited = true,
-                        ErrorMessage = "API 限制已達到"
+                        ErrorMessage = ApiLimitMessage
+                    };
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = false,
+                        ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                    };
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
+
+                var userTopProjects = new List<UserProject>();
+
+                if (repos != null)
+                {
+                    // 檢查前 5 個最受歡迎的倉庫
+                    foreach (var repo in repos.Where(r => r.StargazersCount > 10).Take(5))
+                    {
+                        // 檢查用戶是否在前三貢獻者中
+                        var isTopContributor = await IsUserTopContributorAsync(repo.FullName, username);
+                        
+                        if (isTopContributor.Success && isTopContributor.Data)
+                        {
+                            userTopProjects.Add(new UserProject
+                            {
+                                Name = repo.Name,
+                                FullName = repo.FullName,
+                                Description = repo.Description,
+                                StargazersCount = repo.StargazersCount,
+                                ForksCount = repo.ForksCount,
+                                Language = repo.Language,
+                                IsOwner = false,
+                                Organization = orgName,
+                                CreatedAt = repo.CreatedAt,
+                                UpdatedAt = repo.UpdatedAt
+                            });
+                        }
+                        
+                        if (isTopContributor.IsRateLimited)
+                        {
+                            return new ApiResponse<List<UserProject>>
+                            {
+                                Success = false,
+                                IsRateLimited = true,
+                                ErrorMessage = ApiLimitMessage
+                            };
+                        }
+                        
+                        await Task.Delay(600); // 避免 API 限制
+                    }
+                }
+
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = true,
+                    Data = userTopProjects
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        /// <summary>
+        /// 檢查用戶是否在特定倉庫的前三貢獻者中
+        /// </summary>
+        private async Task<ApiResponse<bool>> IsUserTopContributorAsync(string repoFullName, string username)
+        {
+            try
+            {
+                var contributorsUrl = $"https://api.github.com/repos/{repoFullName}/contributors?per_page=3";
+                var response = await _httpClient.GetAsync(contributorsUrl);
+
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ApiResponse<bool>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = ApiLimitMessage
                     };
                 }
 
                 if (response.IsSuccessStatusCode)
                 {
                     var json = await response.Content.ReadAsStringAsync();
-                    var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
+                    var contributors = JsonSerializer.Deserialize<List<GitHubUser>>(json);
 
-                    var projects = repos?.Where(r => r.StargazersCount > 50) // 只包含有一定影響力的專案
-                        .Take(3) // 每個組織只取前 3 個
-                        .Select(r => new UserProject
-                        {
-                            Name = r.Name,
-                            FullName = r.FullName,
-                            Description = r.Description,
-                            StargazersCount = r.StargazersCount,
-                            ForksCount = r.ForksCount,
-                            Language = r.Language,
-                            IsOwner = false,
-                            Organization = orgName,
-                            CreatedAt = r.CreatedAt,
-                            UpdatedAt = r.UpdatedAt
-                        }).ToList() ?? new List<UserProject>();
+                    var isTopContributor = contributors?.Any(c => c.Login.Equals(username, StringComparison.OrdinalIgnoreCase)) ?? false;
 
-                    return new ApiResponse<List<UserProject>>
+                    return new ApiResponse<bool>
                     {
                         Success = true,
-                        Data = projects
+                        Data = isTopContributor
                     };
                 }
 
-                return new ApiResponse<List<UserProject>>
+                return new ApiResponse<bool>
                 {
                     Success = false,
                     ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
@@ -291,7 +398,7 @@ namespace TaiwanGitHubPopularUsers.Services
             }
             catch (Exception ex)
             {
-                return new ApiResponse<List<UserProject>>
+                return new ApiResponse<bool>
                 {
                     Success = false,
                     ErrorMessage = ex.Message
@@ -302,7 +409,6 @@ namespace TaiwanGitHubPopularUsers.Services
         public void Dispose()
         {
             Dispose(true);
-            GC.SuppressFinalize(this);
         }
 
         protected virtual void Dispose(bool disposing)
