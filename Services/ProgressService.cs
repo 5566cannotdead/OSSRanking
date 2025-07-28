@@ -30,7 +30,7 @@ namespace TaiwanGitHubPopularUsers.Services
                     FailedLocations = new List<string>(),
                     IsCompleted = false,
                     ApiRequestCount = 0,
-                    MaxApiRequestsPerRun = 50,
+                    MaxApiRequestsPerRun = 100,
                     ReachedApiLimit = false
                 };
             }
@@ -81,7 +81,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 FailedLocations = new List<string>(),
                 IsCompleted = false,
                 ApiRequestCount = 0,
-                MaxApiRequestsPerRun = 50,
+                MaxApiRequestsPerRun = 100,
                 ReachedApiLimit = false
             };
         }
@@ -169,8 +169,8 @@ namespace TaiwanGitHubPopularUsers.Services
             if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
             {
                 progress.ReachedApiLimit = true;
-                Console.WriteLine($"⚠️  已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})");
-                return false; // 達到限制
+                Console.WriteLine($"⚠️  已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})，將休息 5 分鐘後繼續...");
+                return false; // 需要休息
             }
             
             return true; // 可以繼續
@@ -179,7 +179,28 @@ namespace TaiwanGitHubPopularUsers.Services
         public async Task MarkApiLimitReachedAsync(RunProgress progress)
         {
             progress.ReachedApiLimit = true;
-            Console.WriteLine($"🔒 已達到 API 請求限制 ({progress.MaxApiRequestsPerRun})，停止本次運行");
+            Console.WriteLine($"⏱️  API 請求達到限制 ({progress.MaxApiRequestsPerRun})，休息 5 分鐘後重置計數並繼續...");
+            await SaveProgressAsync(progress);
+        }
+
+        /// <summary>
+        /// 休息5分鐘並重置API請求計數
+        /// </summary>
+        public async Task RestAndResetApiCountAsync(RunProgress progress)
+        {
+            Console.WriteLine($"😴 開始休息 5 分鐘...");
+            Console.WriteLine($"⏰ 休息開始時間: {DateTime.Now:HH:mm:ss}");
+            
+            // 休息5分鐘
+            await Task.Delay(TimeSpan.FromMinutes(5));
+            
+            // 重置API請求計數
+            progress.ApiRequestCount = 0;
+            progress.ReachedApiLimit = false;
+            
+            Console.WriteLine($"✅ 休息完成，API請求計數已重置");
+            Console.WriteLine($"⏰ 繼續時間: {DateTime.Now:HH:mm:ss}");
+            
             await SaveProgressAsync(progress);
         }
 

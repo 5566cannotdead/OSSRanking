@@ -13,7 +13,7 @@ namespace TaiwanGitHubPopularUsers.Models
         public DateTime? RateLimitResetTime { get; set; }
         public bool EncounteredRateLimit { get; set; }
         public int ApiRequestCount { get; set; }
-        public int MaxApiRequestsPerRun { get; set; } = 50;
+        public int MaxApiRequestsPerRun { get; set; } = 100;
         public bool ReachedApiLimit { get; set; }
     }
 

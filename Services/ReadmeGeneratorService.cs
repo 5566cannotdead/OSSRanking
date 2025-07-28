@@ -57,8 +57,8 @@ namespace TaiwanGitHubPopularUsers.Services
                 // 添加表格標題
                 sb.AppendLine("## 📋 開發者排行榜");
                 sb.AppendLine();
-                sb.AppendLine("| 排名 | 開發者 | Followers | Personal Projects | Top Contributed Projects | Total Influence |");
-                sb.AppendLine("|------|--------|-----------|-------------------|--------------------------|-----------------|");
+                sb.AppendLine("| 排名 | Total Influence | 開發者 | Followers | Personal Projects | Top Contributed Projects |");
+                sb.AppendLine("|------|-----------------|--------|-----------|-------------------|--------------------------|");
 
                 // 生成表格內容
                 for (int i = 0; i < rankedUsers.Count; i++)
@@ -122,7 +122,7 @@ namespace TaiwanGitHubPopularUsers.Services
                         }
                     }
 
-                    sb.AppendLine($"| {rank} | {userLink}<br/>{userInfo} | {user.Followers:N0} | {personalInfo} | {contributedInfo} | **{totalInfluence:N0}** |");
+                    sb.AppendLine($"| {rank} | **{totalInfluence:N0}** | {userLink}<br/>{userInfo} | {user.Followers:N0} | {personalInfo} | {contributedInfo} |");
                 }
 
                 // 添加結尾信息

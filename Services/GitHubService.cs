@@ -55,16 +55,10 @@ namespace TaiwanGitHubPopularUsers.Services
 
             foreach (var location in remainingLocations)
             {
-                // 檢查 API 請求次數限制
+                // 檢查 API 請求次數限制，如果達到限制則休息5分鐘
                 if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
                 {
-                    await _progressService.MarkApiLimitReachedAsync(progress);
-                    return new ApiResponse<List<GitHubUser>>
-                    {
-                        Success = true,
-                        Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
-                        ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
-                    };
+                    await _progressService.RestAndResetApiCountAsync(progress);
                 }
 
                 // 檢查是否遇到 GitHub API 限制
@@ -95,16 +89,24 @@ namespace TaiwanGitHubPopularUsers.Services
                     // 檢查是否還可以發送 API 請求
                     if (!_progressService.IncrementApiRequestCount(progress))
                     {
-                        await _progressService.MarkApiLimitReachedAsync(progress);
-                        return new ApiResponse<List<GitHubUser>>
+                        // 休息5分鐘並重置計數，然後繼續
+                        await _progressService.RestAndResetApiCountAsync(progress);
+                        
+                        // 重新檢查是否可以繼續（應該總是true，因為已經重置了）
+                        if (!_progressService.IncrementApiRequestCount(progress))
                         {
-                            Success = true,
-                            Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
-                            ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
-                        };
+                            // 如果仍然無法繼續，說明有其他問題
+                            Console.WriteLine("❌ 重置後仍無法繼續，可能存在其他問題");
+                            return new ApiResponse<List<GitHubUser>>
+                            {
+                                Success = false,
+                                Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
+                                ErrorMessage = "無法重置 API 請求計數"
+                            };
+                        }
                     }
 
-                    var searchResult = await SearchLocationAsync(location);
+                    var searchResult = await SearchLocationWithRetryAsync(location);
                     
                     if (!searchResult.Success)
                     {
@@ -122,6 +124,7 @@ namespace TaiwanGitHubPopularUsers.Services
                         }
                         else
                         {
+                            Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，跳過此地區: {searchResult.ErrorMessage}");
                             await _progressService.MarkLocationFailedAsync(progress, location, searchResult.ErrorMessage ?? "未知錯誤");
                             continue;
                         }
@@ -135,34 +138,37 @@ namespace TaiwanGitHubPopularUsers.Services
                     
                     // 獲取用戶詳細信息
                     var locationUsers = new List<GitHubUser>();
-                    foreach (var searchUser in searchedUsers.Take(30)) // 限制每個地區最多處理 30 個用戶
+                    
+                    // 對於 Taiwan 地區處理更多用戶（250個），其他地區限制為100個
+                    var maxUsersToProcess = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 250 : 100;
+                    var usersToProcess = searchedUsers.Take(maxUsersToProcess);
+                    
+                    Console.WriteLine($"   📥 將處理前 {Math.Min(searchedUsers.Count, maxUsersToProcess)} 位用戶的詳細信息...");
+                    
+                    foreach (var searchUser in usersToProcess)
                     {
-                        // 檢查 API 請求次數限制
+                        // 檢查 API 請求次數限制，如果達到限制則休息5分鐘
                         if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
                         {
-                            Console.WriteLine($"   ⚠️  達到 API 請求限制，停止處理地區 '{location}'");
-                            await _progressService.MarkApiLimitReachedAsync(progress);
-                            return new ApiResponse<List<GitHubUser>>
-                            {
-                                Success = true,
-                                Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
-                                ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
-                            };
+                            Console.WriteLine($"   ⏱️  API 請求達到限制，休息 5 分鐘後繼續處理地區 '{location}'");
+                            await _progressService.RestAndResetApiCountAsync(progress);
                         }
 
-                        // 檢查是否還可以發送 API 請求
+                        // 檢查是否還可以發送 API 請求（用戶詳細信息請求）
                         if (!_progressService.IncrementApiRequestCount(progress))
                         {
-                            await _progressService.MarkApiLimitReachedAsync(progress);
-                            return new ApiResponse<List<GitHubUser>>
+                            // 休息5分鐘並重置計數，然後繼續
+                            await _progressService.RestAndResetApiCountAsync(progress);
+                            
+                            // 重新檢查是否可以繼續
+                            if (!_progressService.IncrementApiRequestCount(progress))
                             {
-                                Success = true,
-                                Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
-                                ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
-                            };
+                                Console.WriteLine("❌ 重置後仍無法繼續處理用戶詳細信息");
+                                break; // 跳出用戶處理循環，繼續下一個地區
+                            }
                         }
 
-                        var detailResult = await GetUserDetailsAsync(searchUser.Login);
+                        var detailResult = await GetUserDetailsWithProjectsWithRetryAsync(searchUser.Login);
                         
                         if (!detailResult.Success)
                         {
@@ -178,6 +184,8 @@ namespace TaiwanGitHubPopularUsers.Services
                                     Data = allUsers
                                 };
                             }
+                            
+                            Console.WriteLine($"⚠️  跳過用戶 {searchUser.Login}，原因: {detailResult.ErrorMessage}");
                             continue;
                         }
 
@@ -188,7 +196,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             {
                                 locationUsers.Add(detailResult.Data);
                                 allUsers.Add(detailResult.Data);
-                                Console.WriteLine($"   ✅ {detailResult.Data.Login}: {detailResult.Data.Followers} followers (符合條件)");
+                                Console.WriteLine($"   ✅ {detailResult.Data.Login}: {detailResult.Data.Followers} followers, {detailResult.Data.TotalStars} stars, {detailResult.Data.TotalForks} forks (已包含專案信息)");
                             }
                             else if (detailResult.Data.Followers < 10)
                             {
@@ -229,54 +237,88 @@ namespace TaiwanGitHubPopularUsers.Services
         {
             try
             {
-                var searchUrl = $"https://api.github.com/search/users?q=location:{Uri.EscapeDataString(location)}&per_page=100&sort=followers&order=desc";
-                
-                Console.WriteLine($"🔍 正在搜尋地區: {location}");
-                Console.WriteLine($"   🌐 搜尋 URL: {searchUrl}");
-                
-                var response = await _httpClient.GetAsync(searchUrl);
-                
-                if (response.StatusCode == HttpStatusCode.Forbidden)
-                {
-                    var rateLimitResetHeader = response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault();
-                    DateTime? resetTime = null;
-                    
-                    if (long.TryParse(rateLimitResetHeader, out long resetUnixTime))
-                    {
-                        resetTime = DateTimeOffset.FromUnixTimeSeconds(resetUnixTime).UtcDateTime;
-                    }
+                var allUsers = new List<GitHubUser>();
 
-                    return new ApiResponse<List<GitHubUser>>
+                // 判斷是否為 Taiwan，如果是則搜尋3頁，其他地區搜尋2頁
+                var maxPages = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 5 : 2;
+                
+                Console.WriteLine($"🔍 正在搜尋地區: {location} (將搜尋 {maxPages} 頁)");
+                
+                for (int page = 1; page <= maxPages; page++)
+                {
+                    var searchUrl = $"https://api.github.com/search/users?q=location:{Uri.EscapeDataString(location)}&per_page=100&page={page}&sort=followers&order=desc";
+                    
+                    Console.WriteLine($"   🌐 搜尋第 {page} 頁: {searchUrl}");
+                    
+                    var response = await _httpClient.GetAsync(searchUrl);
+                    
+                    if (response.StatusCode == HttpStatusCode.Forbidden)
                     {
-                        Success = false,
-                        IsRateLimited = true,
-                        ErrorMessage = "API 限制已達到 (403 rate limit exceeded)",
-                        RateLimitResetTime = resetTime
-                    };
+                        var rateLimitResetHeader = response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault();
+                        DateTime? resetTime = null;
+                        
+                        if (long.TryParse(rateLimitResetHeader, out long resetUnixTime))
+                        {
+                            resetTime = DateTimeOffset.FromUnixTimeSeconds(resetUnixTime).UtcDateTime;
+                        }
+
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            IsRateLimited = true,
+                            ErrorMessage = "API 限制已達到 (403 rate limit exceeded)",
+                            RateLimitResetTime = resetTime
+                        };
+                    }
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
+                        var searchResult = JsonSerializer.Deserialize<GitHubSearchResponse>(json);
+                        
+                        var pageUsers = searchResult?.Items ?? new List<GitHubUser>();
+                        Console.WriteLine($"   ✅ 第 {page} 頁響應成功，解析到 {pageUsers.Count} 位用戶");
+                        
+                        allUsers.AddRange(pageUsers);
+                        
+                        // 如果這一頁的用戶數少於100，說明沒有更多頁面了
+                        if (pageUsers.Count < 100)
+                        {
+                            Console.WriteLine($"   ℹ️  第 {page} 頁用戶數 < 100，停止搜尋更多頁面");
+                            break;
+                        }
+                        
+                        // 頁面間的延遲，避免 API 限制
+                        if (page < maxPages)
+                        {
+                            await Task.Delay(1000);
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ❌ 第 {page} 頁 API 響應失敗: {response.StatusCode} - {response.ReasonPhrase}");
+                        
+                        // 如果不是第一頁失敗，我們還是返回已獲取的用戶
+                        if (page > 1 && allUsers.Count > 0)
+                        {
+                            break;
+                        }
+                        
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                        };
+                    }
                 }
                 
-                if (response.IsSuccessStatusCode)
+                Console.WriteLine($"   📊 地區 '{location}' 總計搜尋到 {allUsers.Count} 位用戶");
+                
+                return new ApiResponse<List<GitHubUser>>
                 {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var searchResult = JsonSerializer.Deserialize<GitHubSearchResponse>(json);
-                    
-                    Console.WriteLine($"   ✅ API 響應成功，解析到 {searchResult?.Items?.Count ?? 0} 位用戶");
-                    
-                    return new ApiResponse<List<GitHubUser>>
-                    {
-                        Success = true,
-                        Data = searchResult?.Items ?? new List<GitHubUser>()
-                    };
-                }
-                else
-                {
-                    Console.WriteLine($"   ❌ API 響應失敗: {response.StatusCode} - {response.ReasonPhrase}");
-                    return new ApiResponse<List<GitHubUser>>
-                    {
-                        Success = false,
-                        ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
-                    };
-                }
+                    Success = true,
+                    Data = allUsers
+                };
             }
             catch (Exception ex)
             {
@@ -289,10 +331,105 @@ namespace TaiwanGitHubPopularUsers.Services
             }
         }
 
-        private async Task<ApiResponse<GitHubUser>> GetUserDetailsAsync(string username)
+        /// <summary>
+        /// 帶重試機制的用戶詳細信息獲取方法
+        /// </summary>
+        private async Task<ApiResponse<GitHubUser>> GetUserDetailsWithProjectsWithRetryAsync(string username)
+        {
+            const int maxRetries = 3;
+            const int retryDelayMinutes = 5;
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    if (attempt > 1)
+                    {
+                        Console.WriteLine($"      🔄 第 {attempt} 次嘗試獲取用戶 {username} 的詳細信息");
+                    }
+                    
+                    var result = await GetUserDetailsWithProjectsInternalAsync(username);
+                    
+                    if (result.Success || result.IsRateLimited)
+                    {
+                        return result; // 成功或API限制，直接返回
+                    }
+                    
+                    // 如果是最後一次嘗試，返回失敗結果
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        Console.WriteLine($"      最後錯誤: {result.ErrorMessage}");
+                        return result;
+                    }
+                    
+                    // 準備重試
+                    Console.WriteLine($"      ⚠️  獲取用戶 '{username}' 詳細信息失敗 (第 {attempt} 次嘗試)");
+                    Console.WriteLine($"      錯誤: {result.ErrorMessage}");
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    Console.WriteLine($"      ❌ HTTP請求異常 (第 {attempt} 次嘗試獲取用戶 '{username}'):");
+                    Console.WriteLine($"      異常類型: {httpEx.GetType().Name}");
+                    Console.WriteLine($"      異常訊息: {httpEx.Message}");
+                    Console.WriteLine($"      內部異常: {httpEx.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"      堆疊追蹤: {httpEx.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        return new ApiResponse<GitHubUser>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP請求失敗，已重試 {maxRetries} 次: {httpEx.Message}"
+                        };
+                    }
+                    
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"      ❌ 未預期異常 (第 {attempt} 次嘗試獲取用戶 '{username}'):");
+                    Console.WriteLine($"      異常類型: {ex.GetType().Name}");
+                    Console.WriteLine($"      異常訊息: {ex.Message}");
+                    Console.WriteLine($"      內部異常: {ex.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"      堆疊追蹤: {ex.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        return new ApiResponse<GitHubUser>
+                        {
+                            Success = false,
+                            ErrorMessage = $"未預期異常，已重試 {maxRetries} 次: {ex.Message}"
+                        };
+                    }
+                    
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+            }
+            
+            // 理論上不應該到達這裡
+            return new ApiResponse<GitHubUser>
+            {
+                Success = false,
+                ErrorMessage = "所有重試都已失敗"
+            };
+        }
+
+        /// <summary>
+        /// 獲取用戶詳細信息並同時處理專案信息（內部實現）
+        /// </summary>
+        private async Task<ApiResponse<GitHubUser>> GetUserDetailsWithProjectsInternalAsync(string username)
         {
             try
             {
+                // 1. 獲取基本用戶信息
                 var userUrl = $"https://api.github.com/users/{username}";
                 var response = await _httpClient.GetAsync(userUrl);
                 
@@ -315,26 +452,85 @@ namespace TaiwanGitHubPopularUsers.Services
                     };
                 }
                 
-                if (response.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var user = JsonSerializer.Deserialize<GitHubUser>(json);
-                    
-                    if (user != null)
+                    return new ApiResponse<GitHubUser>
                     {
-                        user.LastFetched = DateTime.UtcNow;
-                        return new ApiResponse<GitHubUser>
-                        {
-                            Success = true,
-                            Data = user
-                        };
-                    }
+                        Success = false,
+                        ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                    };
+                }
+
+                var json = await response.Content.ReadAsStringAsync();
+                var user = JsonSerializer.Deserialize<GitHubUser>(json);
+                
+                if (user == null)
+                {
+                    return new ApiResponse<GitHubUser>
+                    {
+                        Success = false,
+                        ErrorMessage = "無法解析用戶信息"
+                    };
+                }
+
+                user.LastFetched = DateTime.UtcNow;
+
+                // 2. 同時獲取用戶的專案信息
+                Console.WriteLine($"      📂 正在獲取 {username} 的專案信息...");
+                
+                // 獲取個人倉庫（限制前100個，按stars排序）
+                var personalProjects = await GetUserPersonalProjectsAsync(username);
+                if (personalProjects.IsRateLimited)
+                {
+                    return new ApiResponse<GitHubUser>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "獲取專案信息時遇到 API 限制"
+                    };
+                }
+
+                // 獲取貢獻專案（限制檢查前3個組織）
+                var contributedProjects = await GetUserContributedProjectsAsync(username);
+                if (contributedProjects.IsRateLimited)
+                {
+                    return new ApiResponse<GitHubUser>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "獲取貢獻專案信息時遇到 API 限制"
+                    };
+                }
+
+                // 3. 合併所有專案信息
+                var allProjects = new List<UserProject>();
+                
+                if (personalProjects.Success && personalProjects.Data != null)
+                {
+                    allProjects.AddRange(personalProjects.Data);
                 }
                 
+                if (contributedProjects.Success && contributedProjects.Data != null)
+                {
+                    allProjects.AddRange(contributedProjects.Data);
+                }
+
+                // 按 Stars 排序並取前5名作為展示
+                user.Projects = allProjects
+                    .OrderByDescending(p => p.StargazersCount)
+                    .Take(5)
+                    .ToList();
+
+                // 計算總計
+                user.TotalStars = allProjects.Sum(p => p.StargazersCount);
+                user.TotalForks = allProjects.Sum(p => p.ForksCount);
+
+                Console.WriteLine($"      ✅ {username}: {user.Projects.Count} 個展示專案，總計 {user.TotalStars} stars, {user.TotalForks} forks");
+
                 return new ApiResponse<GitHubUser>
                 {
-                    Success = false,
-                    ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                    Success = true,
+                    Data = user
                 };
             }
             catch (Exception ex)
@@ -345,6 +541,306 @@ namespace TaiwanGitHubPopularUsers.Services
                     ErrorMessage = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// 獲取用戶個人專案（簡化版）
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetUserPersonalProjectsAsync(string username)
+        {
+            try
+            {
+                var url = $"https://api.github.com/users/{username}/repos?per_page=100&sort=stars&direction=desc";
+                var response = await _httpClient.GetAsync(url);
+
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到"
+                    };
+                }
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
+
+                    var projects = repos?.Where(r => !r.Name.StartsWith('.') && r.StargazersCount >= 0)
+                        .Select(r => new UserProject
+                        {
+                            Name = r.Name,
+                            FullName = r.FullName,
+                            Description = r.Description,
+                            StargazersCount = r.StargazersCount,
+                            ForksCount = r.ForksCount,
+                            Language = r.Language,
+                            IsOwner = true,
+                            Organization = null,
+                            CreatedAt = r.CreatedAt,
+                            UpdatedAt = r.UpdatedAt
+                        }).ToList() ?? new List<UserProject>();
+
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = true,
+                        Data = projects
+                    };
+                }
+
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        /// <summary>
+        /// 獲取用戶貢獻專案（簡化版）
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetUserContributedProjectsAsync(string username)
+        {
+            try
+            {
+                var contributedProjects = new List<UserProject>();
+                
+                // 獲取用戶所屬的組織
+                var orgsUrl = $"https://api.github.com/users/{username}/orgs";
+                var orgsResponse = await _httpClient.GetAsync(orgsUrl);
+
+                if (orgsResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到"
+                    };
+                }
+
+                if (!orgsResponse.IsSuccessStatusCode)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = true,
+                        Data = new List<UserProject>()
+                    };
+                }
+
+                var orgsJson = await orgsResponse.Content.ReadAsStringAsync();
+                var organizations = JsonSerializer.Deserialize<List<GitHubOrganization>>(orgsJson);
+
+                if (organizations != null && organizations.Count > 0)
+                {
+                    // 限制只檢查前10個組織以減少API請求
+                    foreach (var org in organizations.Take(10))
+                    {
+                        var orgRepos = await GetOrganizationTopRepositoriesAsync(org.Login);
+                        
+                        if (orgRepos.Success && orgRepos.Data != null)
+                        {
+                            // 為組織倉庫添加組織標記
+                            foreach (var project in orgRepos.Data)
+                            {
+                                project.IsOwner = false;
+                                project.Organization = org.Login;
+                            }
+                            
+                            contributedProjects.AddRange(orgRepos.Data);
+                        }
+                        else if (orgRepos.IsRateLimited)
+                        {
+                            return new ApiResponse<List<UserProject>>
+                            {
+                                Success = false,
+                                IsRateLimited = true,
+                                ErrorMessage = "API 限制已達到"
+                            };
+                        }
+
+                        await Task.Delay(300); // 避免 API 限制
+                    }
+                }
+
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = true,
+                    Data = contributedProjects.OrderByDescending(p => p.StargazersCount).Take(10).ToList()
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        /// <summary>
+        /// 獲取組織的頂級倉庫（簡化版）
+        /// </summary>
+        private async Task<ApiResponse<List<UserProject>>> GetOrganizationTopRepositoriesAsync(string orgName)
+        {
+            try
+            {
+                var reposUrl = $"https://api.github.com/orgs/{orgName}/repos?per_page=10&sort=stars&direction=desc";
+                var response = await _httpClient.GetAsync(reposUrl);
+
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到"
+                    };
+                }
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    var repos = JsonSerializer.Deserialize<List<GitHubRepository>>(json);
+
+                    var projects = repos?.Where(r => r.StargazersCount > 0) // 只包含有一定影響力的專案
+                        .Take(10) // 每個組織只取前 10 個
+                        .Select(r => new UserProject
+                        {
+                            Name = r.Name,
+                            FullName = r.FullName,
+                            Description = r.Description,
+                            StargazersCount = r.StargazersCount,
+                            ForksCount = r.ForksCount,
+                            Language = r.Language,
+                            IsOwner = false,
+                            Organization = orgName,
+                            CreatedAt = r.CreatedAt,
+                            UpdatedAt = r.UpdatedAt
+                        }).ToList() ?? new List<UserProject>();
+
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = true,
+                        Data = projects
+                    };
+                }
+
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ApiResponse<List<UserProject>>
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+        }
+
+        /// <summary>
+        /// 帶重試機制的地區搜尋方法
+        /// </summary>
+        private async Task<ApiResponse<List<GitHubUser>>> SearchLocationWithRetryAsync(string location)
+        {
+            const int maxRetries = 3;
+            const int retryDelayMinutes = 5;
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    Console.WriteLine($"🔄 第 {attempt} 次嘗試搜尋地區: {location}");
+                    var result = await SearchLocationAsync(location);
+                    
+                    if (result.Success || result.IsRateLimited)
+                    {
+                        return result; // 成功或API限制，直接返回
+                    }
+                    
+                    // 如果是最後一次嘗試，返回失敗結果
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})");
+                        Console.WriteLine($"   最後錯誤: {result.ErrorMessage}");
+                        return result;
+                    }
+                    
+                    // 準備重試
+                    Console.WriteLine($"⚠️  搜尋地區 '{location}' 失敗 (第 {attempt} 次嘗試)");
+                    Console.WriteLine($"   錯誤: {result.ErrorMessage}");
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    Console.WriteLine($"❌ HTTP請求異常 (第 {attempt} 次嘗試搜尋地區 '{location}'):");
+                    Console.WriteLine($"   異常類型: {httpEx.GetType().Name}");
+                    Console.WriteLine($"   異常訊息: {httpEx.Message}");
+                    Console.WriteLine($"   內部異常: {httpEx.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"   堆疊追蹤: {httpEx.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})，中斷整個流程");
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP請求失敗，已重試 {maxRetries} 次: {httpEx.Message}",
+                            Data = new List<GitHubUser>()
+                        };
+                    }
+                    
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 未預期異常 (第 {attempt} 次嘗試搜尋地區 '{location}'):");
+                    Console.WriteLine($"   異常類型: {ex.GetType().Name}");
+                    Console.WriteLine($"   異常訊息: {ex.Message}");
+                    Console.WriteLine($"   內部異常: {ex.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"   堆疊追蹤: {ex.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})，中斷整個流程");
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"未預期異常，已重試 {maxRetries} 次: {ex.Message}",
+                            Data = new List<GitHubUser>()
+                        };
+                    }
+                    
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+            }
+            
+            // 理論上不應該到達這裡
+            return new ApiResponse<List<GitHubUser>>
+            {
+                Success = false,
+                ErrorMessage = "所有重試都已失敗",
+                Data = new List<GitHubUser>()
+            };
         }
 
         public void Dispose()
