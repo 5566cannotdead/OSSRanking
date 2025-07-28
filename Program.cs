@@ -53,7 +53,7 @@ namespace TaiwanGitHubPopularUsers
                 // 初始化服務
                 var progressService = new ProgressService();
                 var userDataService = new UserDataService();
-                using var gitHubService = new GitHubService(GITHUB_TOKEN, progressService);
+                using var gitHubService = new GitHubService(GITHUB_TOKEN, progressService, userDataService);
 
                 // 載入運行進度
                 var progress = await progressService.LoadProgressAsync();
@@ -321,7 +321,8 @@ namespace TaiwanGitHubPopularUsers
             
             try
             {
-                using var gitHubService = new GitHubService(GITHUB_TOKEN, new ProgressService());
+                var userDataService = new UserDataService();
+                using var gitHubService = new GitHubService(GITHUB_TOKEN, new ProgressService(), userDataService);
                 using var userProjectService = new UserProjectService(GITHUB_TOKEN);
                 var readmeGenerator = new ReadmeGeneratorService();
 
@@ -538,6 +539,11 @@ namespace TaiwanGitHubPopularUsers
                             Console.WriteLine($"   ✅ 成功為 {user.Login} 添加專案信息");
                             Console.WriteLine($"   📊 找到 {user.Projects?.Count ?? 0} 個主要專案");
                             Console.WriteLine($"   ⭐ 總計: {user.TotalStars} stars, {user.TotalForks} forks");
+                            
+                            // 每個用戶處理完成後立即保存
+                            Console.WriteLine($"   💾 保存用戶 {user.Login} 的數據...");
+                            await userDataService.SaveUsersAsync(users);
+                            Console.WriteLine($"   ✅ 已保存到本地");
                         }
                         else
                         {
@@ -679,6 +685,11 @@ namespace TaiwanGitHubPopularUsers
                                 
                                 Console.WriteLine($"      ✅ 找到 {user.Projects?.Count ?? 0} 個主要專案");
                                 Console.WriteLine($"      ⭐ 總計: {user.TotalStars} stars, {user.TotalForks} forks");
+                                
+                                // 每個用戶處理完成後立即保存
+                                Console.WriteLine($"      💾 保存用戶 {user.Login} 的數據...");
+                                await userDataService.SaveUsersAsync(users);
+                                Console.WriteLine($"      ✅ 已保存到本地");
                             }
                             else
                             {

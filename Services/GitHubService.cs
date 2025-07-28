@@ -9,6 +9,7 @@ namespace TaiwanGitHubPopularUsers.Services
         private readonly HttpClient _httpClient;
         private readonly string _token;
         private readonly ProgressService _progressService;
+        private readonly UserDataService _userDataService;
 
         // 台灣相關的地區關鍵字
         private readonly List<string> _taiwanLocations = new()
@@ -35,10 +36,11 @@ namespace TaiwanGitHubPopularUsers.Services
             "Matsu", 
         };
 
-        public GitHubService(string token, ProgressService progressService)
+        public GitHubService(string token, ProgressService progressService, UserDataService userDataService)
         {
             _token = token;
             _progressService = progressService;
+            _userDataService = userDataService;
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "Taiwan-GitHub-Popular-Users");
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"token {token}");
@@ -197,6 +199,18 @@ namespace TaiwanGitHubPopularUsers.Services
                                 locationUsers.Add(detailResult.Data);
                                 allUsers.Add(detailResult.Data);
                                 Console.WriteLine($"   ✅ {detailResult.Data.Login}: {detailResult.Data.Followers} followers, {detailResult.Data.TotalStars} stars, {detailResult.Data.TotalForks} forks (已包含專案信息)");
+                                
+                                // 立即保存新找到的用戶
+                                Console.WriteLine($"   💾 立即保存用戶 {detailResult.Data.Login} 到本地...");
+                                try
+                                {
+                                    await _userDataService.MergeAndUpdateUsersAsync(new List<GitHubUser> { detailResult.Data });
+                                    Console.WriteLine($"   ✅ 已保存到本地");
+                                }
+                                catch (Exception saveEx)
+                                {
+                                    Console.WriteLine($"   ⚠️  保存用戶數據時發生錯誤: {saveEx.Message}");
+                                }
                             }
                             else if (detailResult.Data.Followers < 10)
                             {
