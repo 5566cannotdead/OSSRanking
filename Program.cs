@@ -1,4 +1,5 @@
 ﻿using TaiwanGitHubPopularUsers.Services;
+using TaiwanGitHubPopularUsers.Models;
 
 namespace TaiwanGitHubPopularUsers
 {
@@ -22,6 +23,13 @@ namespace TaiwanGitHubPopularUsers
             if (args.Length > 0 && args[0].ToLower() == "--influence")
             {
                 await RunInfluenceReportModeAsync();
+                return;
+            }
+            
+            // 檢查是否是專案豐富化模式
+            if (args.Length > 0 && args[0].ToLower() == "--enrich")
+            {
+                await RunEnrichProjectsModeAsync();
                 return;
             }
             
@@ -253,6 +261,147 @@ namespace TaiwanGitHubPopularUsers
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ 影響力報告模式執行錯誤: {ex.Message}");
+                Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
+            }
+            
+            Console.WriteLine("\n按任意鍵退出...");
+            Console.ReadKey();
+        }
+
+        private static async Task RunEnrichProjectsModeAsync()
+        {
+            Console.WriteLine("\n📂 === 專案豐富化模式 ===");
+            Console.WriteLine("這個模式將為現有用戶添加主要貢獻專案信息（包含個人和組織專案）");
+            
+            try
+            {
+                var userDataService = new UserDataService();
+                
+                Console.WriteLine("\n🔍 載入現有用戶數據...");
+                var users = await userDataService.LoadExistingUsersAsync();
+                
+                if (users.Count == 0)
+                {
+                    Console.WriteLine("❌ 沒有找到用戶數據，請先運行主程序搜集數據");
+                    Console.WriteLine("提示: 運行 'dotnet run' 來搜集用戶數據");
+                    Console.WriteLine("\n按任意鍵退出...");
+                    Console.ReadKey();
+                    return;
+                }
+
+                Console.WriteLine($"✅ 已載入 {users.Count} 位用戶數據");
+                
+                // 檢查是否有用戶已經有專案信息
+                var usersWithProjects = users.Where(u => u.Projects != null && u.Projects.Count > 0).ToList();
+                var usersWithoutProjects = users.Where(u => u.Projects == null || u.Projects.Count == 0).ToList();
+                
+                Console.WriteLine($"📊 現狀統計:");
+                Console.WriteLine($"   - 已有專案信息: {usersWithProjects.Count} 位用戶");
+                Console.WriteLine($"   - 需要豐富化: {usersWithoutProjects.Count} 位用戶");
+                
+                if (usersWithoutProjects.Count == 0)
+                {
+                    Console.WriteLine("\n🎉 所有用戶都已經有專案信息！");
+                    Console.WriteLine("\n按任意鍵退出...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                Console.WriteLine($"\n🔄 即將為 {usersWithoutProjects.Count} 位用戶添加專案信息");
+                Console.WriteLine("⚠️  注意: 每位用戶需要約 3-5 個 API 請求，本次運行最多 50 個請求");
+                
+                var maxUsersToProcess = Math.Min(usersWithoutProjects.Count, 15); // 每個用戶約 3-4 個請求
+                Console.WriteLine($"📊 本次運行將處理前 {maxUsersToProcess} 位用戶");
+                
+                Console.Write("是否繼續？(Y/n): ");
+                var input = Console.ReadLine()?.ToLower();
+                if (input == "n" || input == "no")
+                {
+                    Console.WriteLine("操作已取消");
+                    Console.WriteLine("\n按任意鍵退出...");
+                    Console.ReadKey();
+                    return;
+                }
+
+                using var userProjectService = new UserProjectService(GITHUB_TOKEN);
+                
+                var apiRequestCount = 0;
+                var processedCount = 0;
+                var maxApiRequests = 50;
+                
+                Console.WriteLine($"\n📂 開始為用戶添加專案信息...");
+                Console.WriteLine($"API 請求限制: {maxApiRequests} 次");
+                
+                foreach (var user in usersWithoutProjects.Take(maxUsersToProcess))
+                {
+                    try
+                    {
+                        Console.WriteLine($"\n[{processedCount + 1}/{maxUsersToProcess}] 處理用戶: {user.Login}");
+                        
+                        var result = await userProjectService.EnrichUserWithProjectsAsync(user);
+                        
+                        // 估算 API 請求數量（每個用戶約 3-4 個請求）
+                        apiRequestCount += 4;
+                        
+                        if (result.Success)
+                        {
+                            processedCount++;
+                            Console.WriteLine($"   ✅ 成功為 {user.Login} 添加專案信息");
+                            Console.WriteLine($"   📊 找到 {user.Projects?.Count ?? 0} 個主要專案");
+                            Console.WriteLine($"   ⭐ 總計: {user.TotalStars} stars, {user.TotalForks} forks");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   ❌ 處理 {user.Login} 時發生錯誤: {result.ErrorMessage}");
+                            
+                            if (result.IsRateLimited)
+                            {
+                                Console.WriteLine("\n🚫 遇到 GitHub API 限制，停止處理");
+                                break;
+                            }
+                        }
+                        
+                        // 檢查 API 請求限制
+                        if (apiRequestCount >= maxApiRequests)
+                        {
+                            Console.WriteLine($"\n⚠️  已達到 API 請求限制 ({maxApiRequests} 次)，停止處理");
+                            break;
+                        }
+                        
+                        // 避免過快請求，每個用戶之間暫停 1 秒
+                        await Task.Delay(1000);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"   ❌ 處理 {user.Login} 時發生異常: {ex.Message}");
+                    }
+                }
+                
+                // 保存更新的用戶數據
+                Console.WriteLine($"\n💾 保存用戶數據...");
+                await userDataService.SaveUsersAsync(users);
+                
+                Console.WriteLine($"\n✅ 專案豐富化完成！");
+                Console.WriteLine($"📊 處理統計:");
+                Console.WriteLine($"   - 成功處理: {processedCount} 位用戶");
+                Console.WriteLine($"   - API 請求使用: 約 {apiRequestCount} 次");
+                Console.WriteLine($"   - 剩餘待處理: {usersWithoutProjects.Count - processedCount} 位用戶");
+                
+                if (usersWithoutProjects.Count - processedCount > 0)
+                {
+                    Console.WriteLine($"\n💡 提示: 再次運行 'dotnet run --enrich' 來處理剩餘用戶");
+                }
+                
+                // 顯示更新後的摘要
+                Console.WriteLine($"\n📈 更新後統計:");
+                var updatedUsersWithProjects = users.Where(u => u.Projects != null && u.Projects.Count > 0).ToList();
+                Console.WriteLine($"   - 已有專案信息: {updatedUsersWithProjects.Count} 位用戶");
+                Console.WriteLine($"   - 總計 Stars: {updatedUsersWithProjects.Sum(u => u.TotalStars):N0}");
+                Console.WriteLine($"   - 總計 Forks: {updatedUsersWithProjects.Sum(u => u.TotalForks):N0}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 專案豐富化模式執行錯誤: {ex.Message}");
                 Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
             }
             

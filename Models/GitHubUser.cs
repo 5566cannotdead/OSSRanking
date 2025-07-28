@@ -48,6 +48,27 @@ namespace TaiwanGitHubPopularUsers.Models
 
         // 添加最後更新時間戳，用於差異更新
         public DateTime LastFetched { get; set; } = DateTime.UtcNow;
+
+        // 新增：用戶的主要貢獻專案
+        public List<UserProject> Projects { get; set; } = new();
+
+        // 新增：總計統計
+        public int TotalStars { get; set; }
+        public int TotalForks { get; set; }
+    }
+
+    public class UserProject
+    {
+        public string Name { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public int StargazersCount { get; set; }
+        public int ForksCount { get; set; }
+        public string? Language { get; set; }
+        public bool IsOwner { get; set; } // 是否是倉庫擁有者
+        public string? Organization { get; set; } // 如果是組織倉庫
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
     }
 
     public class GitHubSearchResponse
