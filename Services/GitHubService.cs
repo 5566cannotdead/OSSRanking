@@ -235,9 +235,9 @@ namespace TaiwanGitHubPopularUsers.Services
             try
             {
                 var allUsers = new List<GitHubUser>();
-                
-                // 判斷是否為 Taiwan，如果是則搜尋3頁，其他地區搜尋1頁
-                var maxPages = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 3 : 1;
+
+                // 判斷是否為 Taiwan，如果是則搜尋3頁，其他地區搜尋2頁
+                var maxPages = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 5 : 2;
                 
                 Console.WriteLine($"🔍 正在搜尋地區: {location} (將搜尋 {maxPages} 頁)");
                 
