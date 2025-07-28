@@ -1,17 +1,34 @@
 {
-  "lastRunTime": "2025-07-28T03:02:59.9561645Z",
+  "lastRunTime": "2025-07-28T03:26:02.4647011Z",
   "completedLocations": [
     "Taiwan",
     "Taipei",
-    "New Taipei"
+    "New Taipei",
+    "Taoyuan",
+    "Taichung",
+    "Tainan",
+    "Kaohsiung",
+    "Hsinchu",
+    "Keelung",
+    "Chiayi",
+    "Changhua",
+    "Yunlin",
+    "Nantou",
+    "Pingtung",
+    "Yilan",
+    "Hualien",
+    "Taitung",
+    "Penghu",
+    "Kinmen",
+    "Matsu"
   ],
   "failedLocations": [],
-  "totalUsersFound": 60,
-  "isCompleted": false,
+  "totalUsersFound": 123,
+  "isCompleted": true,
   "lastError": null,
   "rateLimitResetTime": null,
   "encounteredRateLimit": false,
-  "apiRequestCount": 50,
+  "apiRequestCount": 7,
   "maxApiRequestsPerRun": 50,
-  "reachedApiLimit": true
+  "reachedApiLimit": false
 }

@@ -27,8 +27,32 @@ namespace TaiwanGitHubPopularUsers.Services
                 // 1. 獲取用戶自己的倉庫（按 stars 排序）
                 var ownRepos = await GetUserRepositoriesAsync(user.Login);
                 
+                // 如果遇到 API 限制，立即返回
+                if (!ownRepos.Success && ownRepos.IsRateLimited)
+                {
+                    Console.WriteLine($"   🚫 獲取 {user.Login} 的倉庫時遇到 API 限制，停止後續處理");
+                    return new ApiResponse<bool>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到，停止處理後續用戶"
+                    };
+                }
+                
                 // 2. 獲取用戶貢獻的組織倉庫
                 var contributedRepos = await GetUserContributedRepositoriesAsync(user.Login);
+                
+                // 如果遇到 API 限制，立即返回
+                if (!contributedRepos.Success && contributedRepos.IsRateLimited)
+                {
+                    Console.WriteLine($"   🚫 獲取 {user.Login} 的組織貢獻時遇到 API 限制，停止後續處理");
+                    return new ApiResponse<bool>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到，停止處理後續用戶"
+                    };
+                }
 
                 // 3. 合併並選擇前三個最有影響力的專案
                 var allProjects = new List<UserProject>();
@@ -140,6 +164,16 @@ namespace TaiwanGitHubPopularUsers.Services
                 var orgsUrl = $"https://api.github.com/users/{username}/orgs";
                 var orgsResponse = await _httpClient.GetAsync(orgsUrl);
 
+                if (orgsResponse.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return new ApiResponse<List<UserProject>>
+                    {
+                        Success = false,
+                        IsRateLimited = true,
+                        ErrorMessage = "API 限制已達到"
+                    };
+                }
+
                 if (!orgsResponse.IsSuccessStatusCode)
                 {
                     return new ApiResponse<List<UserProject>>
@@ -160,6 +194,17 @@ namespace TaiwanGitHubPopularUsers.Services
                     foreach (var org in organizations.Take(5))
                     {
                         var orgRepos = await GetOrganizationTopRepositoriesAsync(org.Login);
+                        
+                        // 如果遇到 API 限制，立即返回
+                        if (!orgRepos.Success && orgRepos.IsRateLimited)
+                        {
+                            return new ApiResponse<List<UserProject>>
+                            {
+                                Success = false,
+                                IsRateLimited = true,
+                                ErrorMessage = "API 限制已達到"
+                            };
+                        }
                         
                         if (orgRepos.Success && orgRepos.Data != null)
                         {

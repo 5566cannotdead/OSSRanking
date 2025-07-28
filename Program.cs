@@ -340,11 +340,10 @@ namespace TaiwanGitHubPopularUsers
                         
                         var result = await userProjectService.EnrichUserWithProjectsAsync(user);
                         
-                        // 估算 API 請求數量（每個用戶約 3-4 個請求）
-                        apiRequestCount += 4;
-                        
                         if (result.Success)
                         {
+                            // 成功處理時才計算 API 請求數量（每個用戶約 3-4 個請求）
+                            apiRequestCount += 4;
                             processedCount++;
                             Console.WriteLine($"   ✅ 成功為 {user.Login} 添加專案信息");
                             Console.WriteLine($"   📊 找到 {user.Projects?.Count ?? 0} 個主要專案");
@@ -356,9 +355,16 @@ namespace TaiwanGitHubPopularUsers
                             
                             if (result.IsRateLimited)
                             {
-                                Console.WriteLine("\n🚫 遇到 GitHub API 限制，停止處理");
+                                Console.WriteLine("\n🚫 遇到 GitHub API 限制，停止處理後續用戶");
+                                Console.WriteLine("💾 保存當前已處理的用戶數據...");
+                                // 立即保存當前進度
+                                await userDataService.SaveUsersAsync(users);
+                                Console.WriteLine("✅ 數據已保存，可稍後重新運行 --enrich 繼續處理");
                                 break;
                             }
+                            
+                            // 其他錯誤也計算 API 請求（可能已經消耗了部分請求）
+                            apiRequestCount += 2;
                         }
                         
                         // 檢查 API 請求限制

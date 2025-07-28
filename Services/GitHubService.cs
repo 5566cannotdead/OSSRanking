@@ -193,6 +193,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             else if (detailResult.Data.Followers < 100)
                             {
                                 Console.WriteLine($"   ℹ️  {detailResult.Data.Login}: {detailResult.Data.Followers} followers (不符合條件)");
+                                break;
                             }
                         }
 
