@@ -133,7 +133,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 sb.AppendLine();
                 sb.AppendLine("- 本排行榜統計台灣地區 GitHub 用戶的公開數據");
                 sb.AppendLine("- 數據來源：GitHub API");
-                sb.AppendLine("- 統計條件：Followers >= 100");
+                sb.AppendLine("- 統計條件：Followers >= 10");
                 sb.AppendLine("- 個人專案：用戶擁有的所有公開倉庫");
                 sb.AppendLine("- 貢獻專案：用戶在組織中排名前三的貢獻專案");
                 sb.AppendLine("- 排名依據：Followers + Personal Stars + Personal Forks + Contributed Stars + Contributed Forks");

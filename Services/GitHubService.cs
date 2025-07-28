@@ -184,13 +184,13 @@ namespace TaiwanGitHubPopularUsers.Services
                         if (detailResult.Data != null)
                         {
                             // 檢查真實的 followers 數量
-                            if (detailResult.Data.Followers >= 100 && !allUsers.Any(u => u.Id == detailResult.Data.Id))
+                            if (detailResult.Data.Followers >= 10 && !allUsers.Any(u => u.Id == detailResult.Data.Id))
                             {
                                 locationUsers.Add(detailResult.Data);
                                 allUsers.Add(detailResult.Data);
                                 Console.WriteLine($"   ✅ {detailResult.Data.Login}: {detailResult.Data.Followers} followers (符合條件)");
                             }
-                            else if (detailResult.Data.Followers < 100)
+                            else if (detailResult.Data.Followers < 10)
                             {
                                 Console.WriteLine($"   ℹ️  {detailResult.Data.Login}: {detailResult.Data.Followers} followers (不符合條件)");
                                 break;

@@ -191,7 +191,7 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 獲取用戶在貢獻專案中排名前三的專案
+        /// 獲取用戶在貢獻專案中排名前三的專案（優化版）
         /// </summary>
         private async Task<ApiResponse<List<UserProject>>> GetUserTopContributedRepositoriesAsync(string username)
         {
@@ -215,6 +215,7 @@ namespace TaiwanGitHubPopularUsers.Services
 
                 if (!orgsResponse.IsSuccessStatusCode)
                 {
+                    Console.WriteLine($"   📄 {username} 沒有加入任何組織");
                     return new ApiResponse<List<UserProject>>
                     {
                         Success = true,
@@ -225,36 +226,64 @@ namespace TaiwanGitHubPopularUsers.Services
                 var orgsJson = await orgsResponse.Content.ReadAsStringAsync();
                 var organizations = JsonSerializer.Deserialize<List<GitHubOrganization>>(orgsJson);
 
-                if (organizations != null)
+                if (organizations != null && organizations.Count > 0)
                 {
-                    // 限制只檢查前 3 個組織以避免過多 API 請求
-                    foreach (var org in organizations.Take(3))
+                    Console.WriteLine($"   🏢 檢查 {Math.Min(organizations.Count, 20)} 個組織的貢獻專案...");
+                    
+                    // 增加檢查的組織數量到5個，並增加更好的錯誤處理
+                    foreach (var org in organizations.Take(20))
                     {
-                        var orgTopRepos = await GetOrganizationTopRepositoriesWithContributorCheckAsync(org.Login, username);
-                        
-                        if (orgTopRepos.Success && orgTopRepos.Data != null)
+                        try
                         {
-                            topContributedProjects.AddRange(orgTopRepos.Data);
-                        }
-                        
-                        if (orgTopRepos.IsRateLimited)
-                        {
-                            return new ApiResponse<List<UserProject>>
+                            Console.WriteLine($"     🔍 檢查組織: {org.Login}");
+                            var orgTopRepos = await GetOrganizationTopRepositoriesWithContributorCheckAsync(org.Login, username);
+                            
+                            if (orgTopRepos.Success && orgTopRepos.Data != null && orgTopRepos.Data.Count > 0)
                             {
-                                Success = false,
-                                IsRateLimited = true,
-                                ErrorMessage = ApiLimitMessage
-                            };
+                                topContributedProjects.AddRange(orgTopRepos.Data);
+                                Console.WriteLine($"       ✅ 在 {org.Login} 找到 {orgTopRepos.Data.Count} 個前三貢獻專案");
+                            }
+                            else if (orgTopRepos.IsRateLimited)
+                            {
+                                Console.WriteLine($"       🚫 檢查 {org.Login} 時遇到 API 限制");
+                                return new ApiResponse<List<UserProject>>
+                                {
+                                    Success = false,
+                                    IsRateLimited = true,
+                                    ErrorMessage = ApiLimitMessage
+                                };
+                            }
+                            else
+                            {
+                                Console.WriteLine($"       📄 在 {org.Login} 中未找到前三貢獻專案");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"       ❌ 檢查組織 {org.Login} 時發生錯誤: {ex.Message}");
+                            continue; // 繼續檢查下一個組織
                         }
 
-                        await Task.Delay(1000); // 避免 API 限制
+                        await Task.Delay(800); // 組織間延遲
                     }
                 }
+                else
+                {
+                    Console.WriteLine($"   📄 {username} 沒有加入任何組織");
+                }
+
+                // 按stars排序並返回最好的貢獻專案
+                var result = topContributedProjects
+                    .GroupBy(p => p.FullName) // 去重
+                    .Select(g => g.First())
+                    .OrderByDescending(p => p.StargazersCount)
+                    .Take(8) // 增加數量到8個
+                    .ToList();
 
                 return new ApiResponse<List<UserProject>>
                 {
                     Success = true,
-                    Data = topContributedProjects.OrderByDescending(p => p.StargazersCount).Take(5).ToList()
+                    Data = result
                 };
             }
             catch (Exception ex)
@@ -268,13 +297,13 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 獲取組織的頂級倉庫並檢查用戶是否在前三貢獻者中
+        /// 獲取組織的頂級倉庫並檢查用戶是否在前三貢獻者中（優化版）
         /// </summary>
         private async Task<ApiResponse<List<UserProject>>> GetOrganizationTopRepositoriesWithContributorCheckAsync(string orgName, string username)
         {
             try
             {
-                var reposUrl = $"https://api.github.com/orgs/{orgName}/repos?per_page=10&sort=stars&direction=desc";
+                var reposUrl = $"https://api.github.com/orgs/{orgName}/repos?per_page=20&sort=stars&direction=desc";
                 var response = await _httpClient.GetAsync(reposUrl);
 
                 if (response.StatusCode == HttpStatusCode.Forbidden)
@@ -303,40 +332,56 @@ namespace TaiwanGitHubPopularUsers.Services
 
                 if (repos != null)
                 {
-                    // 檢查前 5 個最受歡迎的倉庫
-                    foreach (var repo in repos.Where(r => r.StargazersCount > 10).Take(5))
+                    var eligibleRepos = repos
+                        .Where(r => r.StargazersCount > 0 ) // 排除fork的倉庫
+                        .ToList();
+
+                    Console.WriteLine($"       📊 {orgName} 有 {eligibleRepos.Count} 個符合條件的倉庫");
+
+                    foreach (var repo in eligibleRepos)
                     {
-                        // 檢查用戶是否在前三貢獻者中
-                        var isTopContributor = await IsUserTopContributorAsync(repo.FullName, username);
-                        
-                        if (isTopContributor.Success && isTopContributor.Data)
+                        try
                         {
-                            userTopProjects.Add(new UserProject
+                            // 檢查用戶是否在前三貢獻者中
+                            var isTopContributor = await IsUserTopContributorAsync(repo.FullName, username);
+                            
+                            if (isTopContributor.Success && isTopContributor.Data)
                             {
-                                Name = repo.Name,
-                                FullName = repo.FullName,
-                                Description = repo.Description,
-                                StargazersCount = repo.StargazersCount,
-                                ForksCount = repo.ForksCount,
-                                Language = repo.Language,
-                                IsOwner = false,
-                                Organization = orgName,
-                                CreatedAt = repo.CreatedAt,
-                                UpdatedAt = repo.UpdatedAt
-                            });
+                                var project = new UserProject
+                                {
+                                    Name = repo.Name,
+                                    FullName = repo.FullName,
+                                    Description = repo.Description,
+                                    StargazersCount = repo.StargazersCount,
+                                    ForksCount = repo.ForksCount,
+                                    Language = repo.Language,
+                                    IsOwner = false,
+                                    Organization = orgName,
+                                    CreatedAt = repo.CreatedAt,
+                                    UpdatedAt = repo.UpdatedAt
+                                };
+                                
+                                userTopProjects.Add(project);
+                                Console.WriteLine($"         🏆 前三貢獻者: {repo.Name} ({repo.StargazersCount:N0} stars)");
+                            }
+                            
+                            if (isTopContributor.IsRateLimited)
+                            {
+                                return new ApiResponse<List<UserProject>>
+                                {
+                                    Success = false,
+                                    IsRateLimited = true,
+                                    ErrorMessage = ApiLimitMessage
+                                };
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"         ❌ 檢查 {repo.Name} 時發生錯誤: {ex.Message}");
+                            continue; // 繼續檢查下一個倉庫
                         }
                         
-                        if (isTopContributor.IsRateLimited)
-                        {
-                            return new ApiResponse<List<UserProject>>
-                            {
-                                Success = false,
-                                IsRateLimited = true,
-                                ErrorMessage = ApiLimitMessage
-                            };
-                        }
-                        
-                        await Task.Delay(600); // 避免 API 限制
+                        await Task.Delay(700); // 倉庫間延遲
                     }
                 }
 
@@ -357,7 +402,7 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 檢查用戶是否在特定倉庫的前三貢獻者中
+        /// 檢查用戶是否在特定倉庫的前三貢獻者中（優化版）
         /// </summary>
         private async Task<ApiResponse<bool>> IsUserTopContributorAsync(string repoFullName, string username)
         {
@@ -368,6 +413,7 @@ namespace TaiwanGitHubPopularUsers.Services
 
                 if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
+                    // 可能是私有倉庫或API限制
                     return new ApiResponse<bool>
                     {
                         Success = false,
@@ -376,18 +422,39 @@ namespace TaiwanGitHubPopularUsers.Services
                     };
                 }
 
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    // 倉庫不存在或無權限訪問
+                    return new ApiResponse<bool>
+                    {
+                        Success = true,
+                        Data = false
+                    };
+                }
+
                 if (response.IsSuccessStatusCode)
                 {
                     var json = await response.Content.ReadAsStringAsync();
                     var contributors = JsonSerializer.Deserialize<List<GitHubUser>>(json);
 
-                    var isTopContributor = contributors?.Any(c => c.Login.Equals(username, StringComparison.OrdinalIgnoreCase)) ?? false;
-
-                    return new ApiResponse<bool>
+                    if (contributors != null && contributors.Count > 0)
                     {
-                        Success = true,
-                        Data = isTopContributor
-                    };
+                        var isTopContributor = contributors.Any(c => 
+                            c.Login.Equals(username, StringComparison.OrdinalIgnoreCase));
+
+                        if (isTopContributor)
+                        {
+                            var userRank = contributors.FindIndex(c => 
+                                c.Login.Equals(username, StringComparison.OrdinalIgnoreCase)) + 1;
+                            Console.WriteLine($"           🎯 {username} 在 {repoFullName} 排名第 {userRank}");
+                        }
+
+                        return new ApiResponse<bool>
+                        {
+                            Success = true,
+                            Data = isTopContributor
+                        };
+                    }
                 }
 
                 return new ApiResponse<bool>
