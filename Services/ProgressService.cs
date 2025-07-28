@@ -30,7 +30,7 @@ namespace TaiwanGitHubPopularUsers.Services
                     FailedLocations = new List<string>(),
                     IsCompleted = false,
                     ApiRequestCount = 0,
-                    MaxApiRequestsPerRun = 100,
+                    MaxApiRequestsPerRun = 10000,
                     ReachedApiLimit = false
                 };
             }
@@ -81,7 +81,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 FailedLocations = new List<string>(),
                 IsCompleted = false,
                 ApiRequestCount = 0,
-                MaxApiRequestsPerRun = 100,
+                MaxApiRequestsPerRun = 10000,
                 ReachedApiLimit = false
             };
         }

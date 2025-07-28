@@ -82,8 +82,8 @@ namespace TaiwanGitHubPopularUsers
                                 Console.WriteLine($"{user.Login,-15}\t{user.Followers,6}\t{user.PublicRepos,6}\t{user.Location ?? "未設定"}");
                             }
                             
-                            var qualifiedUsers = detailedUsers.Where(u => u.Followers >= 100).ToList();
-                            Console.WriteLine($"\n符合條件的用戶 (followers >= 100): {qualifiedUsers.Count}");
+                            var qualifiedUsers = detailedUsers.Where(u => u.Followers >= 50).ToList();
+                            Console.WriteLine($"\n符合條件的用戶 (followers >= 50): {qualifiedUsers.Count}");
                             
                             if (qualifiedUsers.Count > 0)
                             {
