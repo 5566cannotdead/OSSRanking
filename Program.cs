@@ -86,6 +86,11 @@ namespace TaiwanGitHubPopularUsers
                         Console.WriteLine("\n🔄 自動開始為用戶添加專案信息...");
                         await AutoEnrichAllUsersAsync();
                         
+                        // 生成最終的 README.md
+                        Console.WriteLine($"\n📄 生成最終 README.md 排行榜...");
+                        var readmeGenerator = new ReadmeGeneratorService();
+                        await readmeGenerator.GenerateReadmeAsync(existingUsers);
+                        
                         Console.WriteLine($"\n✅ 程序執行完成！");
                         Console.WriteLine($"結束時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                         Console.WriteLine("\n按任意鍵退出...");
@@ -184,6 +189,12 @@ namespace TaiwanGitHubPopularUsers
                     Console.WriteLine("🔄 自動開始為用戶添加專案信息...");
                     
                     await AutoEnrichAllUsersAsync();
+                    
+                    // 生成最終的 README.md
+                    Console.WriteLine($"\n📄 生成最終 README.md 排行榜...");
+                    var finalUsers = await userDataService.LoadExistingUsersAsync();
+                    var readmeGenerator = new ReadmeGeneratorService();
+                    await readmeGenerator.GenerateReadmeAsync(finalUsers);
                 }
                 
                 Console.WriteLine($"\n✅ 程序執行完成！");
@@ -363,7 +374,7 @@ namespace TaiwanGitHubPopularUsers
                 
                 var apiRequestCount = 0;
                 var processedCount = 0;
-                var maxApiRequests = 50;
+                var maxApiRequests = 500;
                 
                 Console.WriteLine($"\n📂 開始為用戶添加專案信息...");
                 Console.WriteLine($"API 請求限制: {maxApiRequests} 次");
@@ -422,6 +433,11 @@ namespace TaiwanGitHubPopularUsers
                 // 保存更新的用戶數據
                 Console.WriteLine($"\n💾 保存用戶數據...");
                 await userDataService.SaveUsersAsync(users);
+                
+                // 生成 README.md
+                Console.WriteLine($"\n📄 生成 README.md 排行榜...");
+                var readmeGenerator = new ReadmeGeneratorService();
+                await readmeGenerator.GenerateReadmeAsync(users);
                 
                 Console.WriteLine($"\n✅ 專案豐富化完成！");
                 Console.WriteLine($"📊 處理統計:");
@@ -580,6 +596,11 @@ namespace TaiwanGitHubPopularUsers
                 
                 // 最終保存
                 await userDataService.SaveUsersAsync(users);
+                
+                // 生成 README.md
+                Console.WriteLine($"\n📄 生成 README.md 排行榜...");
+                var readmeGenerator = new ReadmeGeneratorService();
+                await readmeGenerator.GenerateReadmeAsync(users);
                 
                 // 顯示最終統計
                 var finalUsersWithProjects = users.Where(u => u.Projects != null && u.Projects.Count > 0).ToList();
