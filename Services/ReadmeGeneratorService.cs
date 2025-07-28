@@ -50,7 +50,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 sb.AppendLine();
                 sb.AppendLine("### 統計項目說明");
                 sb.AppendLine("- **Personal Projects**: 用戶個人擁有的所有專案");
-                sb.AppendLine("- **Top Contributed**: 用戶在組織專案中排名前三的貢獻專案");
+                sb.AppendLine("- **Top Contributed**: 用戶在組織專案中排名前五的貢獻專案");
                 sb.AppendLine("- **Total Influence**: Followers + Personal Stars + Personal Forks + Contributed Stars + Contributed Forks");
                 sb.AppendLine();
 
@@ -135,7 +135,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 sb.AppendLine("- 數據來源：GitHub API");
                 sb.AppendLine("- 統計條件：Followers >= 10");
                 sb.AppendLine("- 個人專案：用戶擁有的所有公開倉庫");
-                sb.AppendLine("- 貢獻專案：用戶在組織中排名前三的貢獻專案");
+                sb.AppendLine("- 貢獻專案：用戶在組織中排名前五的貢獻專案");
                 sb.AppendLine("- 排名依據：Followers + Personal Stars + Personal Forks + Contributed Stars + Contributed Forks");
                 sb.AppendLine();
                 sb.AppendLine("## 🔄 更新頻率");

@@ -9,6 +9,7 @@ namespace TaiwanGitHubPopularUsers
         
         static async Task Main(string[] args)
         {
+            // args = new[] { "--user","PeterDaveHello" }; // 用於測試診斷模式，實際運行時可以移除或修改
             Console.WriteLine("=== 台灣 GitHub 知名開發者抓取工具 ===");
             Console.WriteLine($"開始時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             
@@ -30,6 +31,20 @@ namespace TaiwanGitHubPopularUsers
             if (args.Length > 0 && args[0].ToLower() == "--enrich")
             {
                 await RunEnrichProjectsModeAsync();
+                return;
+            }
+            
+            // 檢查是否是單個用戶測試模式
+            if (args.Length > 0 && args[0].ToLower() == "--user")
+            {
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("❌ 請提供用戶名稱");
+                    Console.WriteLine("使用方式: dotnet run --user <username>");
+                    Console.WriteLine("範例: dotnet run --user PeterDaveHello");
+                    return;
+                }
+                await RunSingleUserModeAsync(args[1]);
                 return;
             }
             
@@ -292,6 +307,134 @@ namespace TaiwanGitHubPopularUsers
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ 影響力報告模式執行錯誤: {ex.Message}");
+                Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
+            }
+            
+            Console.WriteLine("\n按任意鍵退出...");
+            Console.ReadKey();
+        }
+
+        private static async Task RunSingleUserModeAsync(string username)
+        {
+            Console.WriteLine($"\n👤 === 單個用戶測試模式 ===");
+            Console.WriteLine($"正在獲取用戶 '{username}' 的詳細信息...");
+            
+            try
+            {
+                using var gitHubService = new GitHubService(GITHUB_TOKEN, new ProgressService());
+                using var userProjectService = new UserProjectService(GITHUB_TOKEN);
+                var readmeGenerator = new ReadmeGeneratorService();
+
+                Console.WriteLine($"\n🔍 正在搜尋用戶 {username}...");
+                
+                // 獲取用戶基本信息
+                var userDetailsUrl = $"https://api.github.com/users/{username}";
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.Add("User-Agent", "Taiwan-GitHub-Popular-Users");
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"token {GITHUB_TOKEN}");
+                httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
+                
+                var response = await httpClient.GetAsync(userDetailsUrl);
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"❌ 無法找到用戶 '{username}': {response.StatusCode} - {response.ReasonPhrase}");
+                    return;
+                }
+                
+                var json = await response.Content.ReadAsStringAsync();
+                var user = System.Text.Json.JsonSerializer.Deserialize<GitHubUser>(json);
+                
+                if (user == null)
+                {
+                    Console.WriteLine($"❌ 無法解析用戶 '{username}' 的數據");
+                    return;
+                }
+                
+                user.LastFetched = DateTime.UtcNow;
+                
+                Console.WriteLine($"✅ 找到用戶: {user.Login}");
+                Console.WriteLine($"   📊 基本信息:");
+                Console.WriteLine($"      - 名稱: {user.Name ?? "未設定"}");
+                Console.WriteLine($"      - 公司: {user.Company ?? "未設定"}");
+                Console.WriteLine($"      - 位置: {user.Location ?? "未設定"}");
+                Console.WriteLine($"      - 追蹤者: {user.Followers:N0}");
+                Console.WriteLine($"      - 公開倉庫: {user.PublicRepos:N0}");
+                Console.WriteLine($"      - 註冊時間: {user.CreatedAt:yyyy-MM-dd}");
+                
+                if (!string.IsNullOrEmpty(user.Bio))
+                {
+                    Console.WriteLine($"      - 簡介: {user.Bio}");
+                }
+
+                Console.WriteLine($"\n📂 正在獲取專案信息...");
+                
+                // 獲取用戶的專案信息
+                var enrichResult = await userProjectService.EnrichUserWithProjectsAsync(user);
+                
+                if (enrichResult.Success)
+                {
+                    Console.WriteLine($"\n✅ 專案信息獲取完成:");
+                    Console.WriteLine($"   📈 統計:");
+                    Console.WriteLine($"      - 展示專案數: {user.Projects?.Count ?? 0}");
+                    Console.WriteLine($"      - 總 Stars: {user.TotalStars:N0}");
+                    Console.WriteLine($"      - 總 Forks: {user.TotalForks:N0}");
+                    
+                    if (user.Projects != null && user.Projects.Count > 0)
+                    {
+                        Console.WriteLine($"\n   🏆 主要專案:");
+                        foreach (var project in user.Projects.Take(5))
+                        {
+                            var ownershipIcon = project.IsOwner ? "👤" : "🏢";
+                            var orgInfo = project.Organization != null ? $" ({project.Organization})" : "";
+                            Console.WriteLine($"      {ownershipIcon} {project.Name}{orgInfo}");
+                            Console.WriteLine($"         - ⭐ {project.StargazersCount:N0} stars, 🍴 {project.ForksCount:N0} forks");
+                            Console.WriteLine($"         - 語言: {project.Language ?? "未知"}");
+                            if (!string.IsNullOrEmpty(project.Description))
+                            {
+                                var description = project.Description.Length > 80 
+                                    ? project.Description.Substring(0, 80) + "..."
+                                    : project.Description;
+                                Console.WriteLine($"         - 描述: {description}");
+                            }
+                            Console.WriteLine();
+                        }
+                    }
+                }
+                else if (enrichResult.IsRateLimited)
+                {
+                    Console.WriteLine($"⚠️  獲取專案信息時遇到 API 限制");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ 獲取專案信息失敗: {enrichResult.ErrorMessage}");
+                }
+
+                // 保存用戶數據到 JSON 檔案
+                Console.WriteLine($"\n💾 保存用戶數據...");
+                var users = new List<GitHubUser> { user };
+                var singleUserDataService = new UserDataService($"{username}_data.json");
+                await singleUserDataService.SaveUsersAsync(users);
+                
+                Console.WriteLine($"✅ 用戶數據已保存到 {username}_data.json");
+
+                // 生成單個用戶的 README
+                Console.WriteLine($"\n📄 生成用戶 README...");
+                await readmeGenerator.GenerateReadmeAsync(users, $"{username}_README.md");
+                
+                Console.WriteLine($"✅ 用戶 README 已生成到 {username}_README.md");
+                
+                Console.WriteLine($"\n🎉 用戶 '{username}' 的數據生成完成！");
+                
+                // 顯示檔案信息
+                Console.WriteLine($"\n📁 生成的檔案:");
+                Console.WriteLine($"   - {username}_data.json - 用戶詳細數據");
+                Console.WriteLine($"   - {username}_README.md - 用戶展示頁面");
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 單個用戶模式執行錯誤: {ex.Message}");
                 Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
             }
             

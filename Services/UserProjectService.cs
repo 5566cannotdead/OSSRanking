@@ -39,7 +39,7 @@ namespace TaiwanGitHubPopularUsers.Services
                     };
                 }
                 
-                // 2. 獲取用戶在貢獻專案中排名前三的專案
+                // 2. 獲取用戶在貢獻專案中排名前五的專案
                 var topContributedRepos = await GetUserTopContributedRepositoriesAsync(user.Login);
                 
                 if (!topContributedRepos.Success && topContributedRepos.IsRateLimited)
@@ -63,11 +63,11 @@ namespace TaiwanGitHubPopularUsers.Services
                     Console.WriteLine($"   📊 個人專案: {ownRepos.Data.Count} 個");
                 }
                 
-                // 添加排名前三的貢獻專案
+                // 添加排名前五的貢獻專案
                 if (topContributedRepos.Success && topContributedRepos.Data != null)
                 {
                     allProjects.AddRange(topContributedRepos.Data);
-                    Console.WriteLine($"   🏆 前三貢獻專案: {topContributedRepos.Data.Count} 個");
+                    Console.WriteLine($"   🏆 前五貢獻專案: {topContributedRepos.Data.Count} 個");
                 }
 
                 // 按 Stars 排序並取前五名作為展示
@@ -191,7 +191,7 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 獲取用戶在貢獻專案中排名前三的專案（優化版）
+        /// 獲取用戶在貢獻專案中排名前五的專案（優化版）
         /// </summary>
         private async Task<ApiResponse<List<UserProject>>> GetUserTopContributedRepositoriesAsync(string username)
         {
@@ -230,7 +230,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 {
                     Console.WriteLine($"   🏢 檢查 {Math.Min(organizations.Count, 20)} 個組織的貢獻專案...");
                     
-                    // 增加檢查的組織數量到5個，並增加更好的錯誤處理
+                    // 增加檢查的組織數量到20個，並增加更好的錯誤處理
                     foreach (var org in organizations.Take(20))
                     {
                         try
@@ -241,7 +241,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             if (orgTopRepos.Success && orgTopRepos.Data != null && orgTopRepos.Data.Count > 0)
                             {
                                 topContributedProjects.AddRange(orgTopRepos.Data);
-                                Console.WriteLine($"       ✅ 在 {org.Login} 找到 {orgTopRepos.Data.Count} 個前三貢獻專案");
+                                Console.WriteLine($"       ✅ 在 {org.Login} 找到 {orgTopRepos.Data.Count} 個前五貢獻專案");
                             }
                             else if (orgTopRepos.IsRateLimited)
                             {
@@ -255,7 +255,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             }
                             else
                             {
-                                Console.WriteLine($"       📄 在 {org.Login} 中未找到前三貢獻專案");
+                                Console.WriteLine($"       📄 在 {org.Login} 中未找到前五貢獻專案");
                             }
                         }
                         catch (Exception ex)
@@ -297,7 +297,7 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 獲取組織的頂級倉庫並檢查用戶是否在前三貢獻者中（優化版）
+        /// 獲取組織的頂級倉庫並檢查用戶是否在前五貢獻者中（優化版）
         /// </summary>
         private async Task<ApiResponse<List<UserProject>>> GetOrganizationTopRepositoriesWithContributorCheckAsync(string orgName, string username)
         {
@@ -342,7 +342,7 @@ namespace TaiwanGitHubPopularUsers.Services
                     {
                         try
                         {
-                            // 檢查用戶是否在前三貢獻者中
+                            // 檢查用戶是否在前五貢獻者中
                             var isTopContributor = await IsUserTopContributorAsync(repo.FullName, username);
                             
                             if (isTopContributor.Success && isTopContributor.Data)
@@ -362,7 +362,7 @@ namespace TaiwanGitHubPopularUsers.Services
                                 };
                                 
                                 userTopProjects.Add(project);
-                                Console.WriteLine($"         🏆 前三貢獻者: {repo.Name} ({repo.StargazersCount:N0} stars)");
+                                Console.WriteLine($"         🏆 前五貢獻者: {repo.Name} ({repo.StargazersCount:N0} stars)");
                             }
                             
                             if (isTopContributor.IsRateLimited)
@@ -402,13 +402,13 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 檢查用戶是否在特定倉庫的前三貢獻者中（優化版）
+        /// 檢查用戶是否在特定倉庫的前五貢獻者中（優化版）
         /// </summary>
         private async Task<ApiResponse<bool>> IsUserTopContributorAsync(string repoFullName, string username)
         {
             try
             {
-                var contributorsUrl = $"https://api.github.com/repos/{repoFullName}/contributors?per_page=3";
+                var contributorsUrl = $"https://api.github.com/repos/{repoFullName}/contributors?per_page=5";
                 var response = await _httpClient.GetAsync(contributorsUrl);
 
                 if (response.StatusCode == HttpStatusCode.Forbidden)
