@@ -106,7 +106,7 @@ namespace TaiwanGitHubPopularUsers.Services
                         }
                     }
 
-                    var searchResult = await SearchLocationAsync(location);
+                    var searchResult = await SearchLocationWithRetryAsync(location);
                     
                     if (!searchResult.Success)
                     {
@@ -124,6 +124,7 @@ namespace TaiwanGitHubPopularUsers.Services
                         }
                         else
                         {
+                            Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，跳過此地區: {searchResult.ErrorMessage}");
                             await _progressService.MarkLocationFailedAsync(progress, location, searchResult.ErrorMessage ?? "未知錯誤");
                             continue;
                         }
@@ -167,7 +168,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             }
                         }
 
-                        var detailResult = await GetUserDetailsWithProjectsAsync(searchUser.Login);
+                        var detailResult = await GetUserDetailsWithProjectsWithRetryAsync(searchUser.Login);
                         
                         if (!detailResult.Success)
                         {
@@ -183,6 +184,8 @@ namespace TaiwanGitHubPopularUsers.Services
                                     Data = allUsers
                                 };
                             }
+                            
+                            Console.WriteLine($"⚠️  跳過用戶 {searchUser.Login}，原因: {detailResult.ErrorMessage}");
                             continue;
                         }
 
@@ -329,9 +332,100 @@ namespace TaiwanGitHubPopularUsers.Services
         }
 
         /// <summary>
-        /// 獲取用戶詳細信息並同時處理專案信息
+        /// 帶重試機制的用戶詳細信息獲取方法
         /// </summary>
-        private async Task<ApiResponse<GitHubUser>> GetUserDetailsWithProjectsAsync(string username)
+        private async Task<ApiResponse<GitHubUser>> GetUserDetailsWithProjectsWithRetryAsync(string username)
+        {
+            const int maxRetries = 3;
+            const int retryDelayMinutes = 5;
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    if (attempt > 1)
+                    {
+                        Console.WriteLine($"      🔄 第 {attempt} 次嘗試獲取用戶 {username} 的詳細信息");
+                    }
+                    
+                    var result = await GetUserDetailsWithProjectsInternalAsync(username);
+                    
+                    if (result.Success || result.IsRateLimited)
+                    {
+                        return result; // 成功或API限制，直接返回
+                    }
+                    
+                    // 如果是最後一次嘗試，返回失敗結果
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        Console.WriteLine($"      最後錯誤: {result.ErrorMessage}");
+                        return result;
+                    }
+                    
+                    // 準備重試
+                    Console.WriteLine($"      ⚠️  獲取用戶 '{username}' 詳細信息失敗 (第 {attempt} 次嘗試)");
+                    Console.WriteLine($"      錯誤: {result.ErrorMessage}");
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    Console.WriteLine($"      ❌ HTTP請求異常 (第 {attempt} 次嘗試獲取用戶 '{username}'):");
+                    Console.WriteLine($"      異常類型: {httpEx.GetType().Name}");
+                    Console.WriteLine($"      異常訊息: {httpEx.Message}");
+                    Console.WriteLine($"      內部異常: {httpEx.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"      堆疊追蹤: {httpEx.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        return new ApiResponse<GitHubUser>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP請求失敗，已重試 {maxRetries} 次: {httpEx.Message}"
+                        };
+                    }
+                    
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"      ❌ 未預期異常 (第 {attempt} 次嘗試獲取用戶 '{username}'):");
+                    Console.WriteLine($"      異常類型: {ex.GetType().Name}");
+                    Console.WriteLine($"      異常訊息: {ex.Message}");
+                    Console.WriteLine($"      內部異常: {ex.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"      堆疊追蹤: {ex.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"      ❌ 獲取用戶 '{username}' 詳細信息失敗，已達到最大重試次數 ({maxRetries})");
+                        return new ApiResponse<GitHubUser>
+                        {
+                            Success = false,
+                            ErrorMessage = $"未預期異常，已重試 {maxRetries} 次: {ex.Message}"
+                        };
+                    }
+                    
+                    Console.WriteLine($"      將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+            }
+            
+            // 理論上不應該到達這裡
+            return new ApiResponse<GitHubUser>
+            {
+                Success = false,
+                ErrorMessage = "所有重試都已失敗"
+            };
+        }
+
+        /// <summary>
+        /// 獲取用戶詳細信息並同時處理專案信息（內部實現）
+        /// </summary>
+        private async Task<ApiResponse<GitHubUser>> GetUserDetailsWithProjectsInternalAsync(string username)
         {
             try
             {
@@ -657,6 +751,96 @@ namespace TaiwanGitHubPopularUsers.Services
                     ErrorMessage = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// 帶重試機制的地區搜尋方法
+        /// </summary>
+        private async Task<ApiResponse<List<GitHubUser>>> SearchLocationWithRetryAsync(string location)
+        {
+            const int maxRetries = 3;
+            const int retryDelayMinutes = 5;
+            
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    Console.WriteLine($"🔄 第 {attempt} 次嘗試搜尋地區: {location}");
+                    var result = await SearchLocationAsync(location);
+                    
+                    if (result.Success || result.IsRateLimited)
+                    {
+                        return result; // 成功或API限制，直接返回
+                    }
+                    
+                    // 如果是最後一次嘗試，返回失敗結果
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})");
+                        Console.WriteLine($"   最後錯誤: {result.ErrorMessage}");
+                        return result;
+                    }
+                    
+                    // 準備重試
+                    Console.WriteLine($"⚠️  搜尋地區 '{location}' 失敗 (第 {attempt} 次嘗試)");
+                    Console.WriteLine($"   錯誤: {result.ErrorMessage}");
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    Console.WriteLine($"❌ HTTP請求異常 (第 {attempt} 次嘗試搜尋地區 '{location}'):");
+                    Console.WriteLine($"   異常類型: {httpEx.GetType().Name}");
+                    Console.WriteLine($"   異常訊息: {httpEx.Message}");
+                    Console.WriteLine($"   內部異常: {httpEx.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"   堆疊追蹤: {httpEx.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})，中斷整個流程");
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP請求失敗，已重試 {maxRetries} 次: {httpEx.Message}",
+                            Data = new List<GitHubUser>()
+                        };
+                    }
+                    
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 未預期異常 (第 {attempt} 次嘗試搜尋地區 '{location}'):");
+                    Console.WriteLine($"   異常類型: {ex.GetType().Name}");
+                    Console.WriteLine($"   異常訊息: {ex.Message}");
+                    Console.WriteLine($"   內部異常: {ex.InnerException?.Message ?? "無"}");
+                    Console.WriteLine($"   堆疊追蹤: {ex.StackTrace}");
+                    
+                    if (attempt == maxRetries)
+                    {
+                        Console.WriteLine($"❌ 搜尋地區 '{location}' 失敗，已達到最大重試次數 ({maxRetries})，中斷整個流程");
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"未預期異常，已重試 {maxRetries} 次: {ex.Message}",
+                            Data = new List<GitHubUser>()
+                        };
+                    }
+                    
+                    Console.WriteLine($"   將在 {retryDelayMinutes} 分鐘後重試...");
+                    await Task.Delay(TimeSpan.FromMinutes(retryDelayMinutes));
+                }
+            }
+            
+            // 理論上不應該到達這裡
+            return new ApiResponse<List<GitHubUser>>
+            {
+                Success = false,
+                ErrorMessage = "所有重試都已失敗",
+                Data = new List<GitHubUser>()
+            };
         }
 
         public void Dispose()
