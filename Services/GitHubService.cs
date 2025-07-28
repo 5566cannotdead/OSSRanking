@@ -13,26 +13,26 @@ namespace TaiwanGitHubPopularUsers.Services
         // 台灣相關的地區關鍵字
         private readonly List<string> _taiwanLocations = new()
         {
-            "Taiwan", "台灣", "臺灣",
-            "Taipei", "台北", "臺北",
-            "New Taipei", "新北",
-            "Taoyuan", "桃園",
-            "Taichung", "台中", "臺中",
-            "Tainan", "台南", "臺南",
-            "Kaohsiung", "高雄",
-            "Hsinchu", "新竹",
-            "Keelung", "基隆",
-            "Chiayi", "嘉義",
-            "Changhua", "彰化",
-            "Yunlin", "雲林",
-            "Nantou", "南投",
-            "Pingtung", "屏東",
-            "Yilan", "宜蘭",
-            "Hualien", "花蓮",
-            "Taitung", "台東", "臺東",
-            "Penghu", "澎湖",
-            "Kinmen", "金門",
-            "Matsu", "馬祖"
+            "Taiwan", 
+            "Taipei", 
+            "New Taipei",
+            "Taoyuan", 
+            "Taichung",
+            "Tainan", 
+            "Kaohsiung",
+            "Hsinchu", 
+            "Keelung", 
+            "Chiayi", 
+            "Changhua", 
+            "Yunlin", 
+            "Nantou", 
+            "Pingtung", 
+            "Yilan", 
+            "Hualien", 
+            "Taitung", 
+            "Penghu", 
+            "Kinmen", 
+            "Matsu", 
         };
 
         public GitHubService(string token, ProgressService progressService)
@@ -51,10 +51,23 @@ namespace TaiwanGitHubPopularUsers.Services
             var remainingLocations = _progressService.GetRemainingLocations(progress, _taiwanLocations);
 
             Console.WriteLine($"🔍 開始搜尋剩餘的 {remainingLocations.Count} 個地區");
+            Console.WriteLine($"📊 本次運行 API 請求限制: {progress.MaxApiRequestsPerRun}");
 
             foreach (var location in remainingLocations)
             {
-                // 檢查是否遇到 API 限制
+                // 檢查 API 請求次數限制
+                if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
+                {
+                    await _progressService.MarkApiLimitReachedAsync(progress);
+                    return new ApiResponse<List<GitHubUser>>
+                    {
+                        Success = true,
+                        Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
+                        ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
+                    };
+                }
+
+                // 檢查是否遇到 GitHub API 限制
                 if (progress.EncounteredRateLimit && progress.RateLimitResetTime.HasValue)
                 {
                     if (DateTime.UtcNow < progress.RateLimitResetTime.Value)
@@ -63,14 +76,14 @@ namespace TaiwanGitHubPopularUsers.Services
                         {
                             Success = false,
                             IsRateLimited = true,
-                            ErrorMessage = "API 限制尚未重置",
+                            ErrorMessage = "GitHub API 限制尚未重置",
                             RateLimitResetTime = progress.RateLimitResetTime,
                             Data = allUsers
                         };
                     }
                     else
                     {
-                        // API 限制已重置
+                        // GitHub API 限制已重置
                         progress.EncounteredRateLimit = false;
                         progress.RateLimitResetTime = null;
                         await _progressService.SaveProgressAsync(progress);
@@ -79,6 +92,18 @@ namespace TaiwanGitHubPopularUsers.Services
 
                 try
                 {
+                    // 檢查是否還可以發送 API 請求
+                    if (!_progressService.IncrementApiRequestCount(progress))
+                    {
+                        await _progressService.MarkApiLimitReachedAsync(progress);
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = true,
+                            Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
+                            ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
+                        };
+                    }
+
                     var searchResult = await SearchLocationAsync(location);
                     
                     if (!searchResult.Success)
@@ -90,7 +115,7 @@ namespace TaiwanGitHubPopularUsers.Services
                             {
                                 Success = false,
                                 IsRateLimited = true,
-                                ErrorMessage = "遇到 API 限制，已保存進度",
+                                ErrorMessage = "遇到 GitHub API 限制，已保存進度",
                                 RateLimitResetTime = searchResult.RateLimitResetTime,
                                 Data = allUsers
                             };
@@ -102,13 +127,42 @@ namespace TaiwanGitHubPopularUsers.Services
                         }
                     }
 
-                    var qualifiedUsers = searchResult.Data?.Where(u => u.Followers >= 100).ToList() ?? new List<GitHubUser>();
+                    // ⚠️ 重要：搜索 API 返回的 followers 通常為 0，需要獲取詳細信息
+                    var searchedUsers = searchResult.Data ?? new List<GitHubUser>();
+                    var totalUsersFound = searchedUsers.Count;
+                    Console.WriteLine($"   📊 地區 '{location}' 搜尋結果: 總共 {totalUsersFound} 位用戶");
+                    Console.WriteLine($"   📥 正在獲取用戶詳細信息（包含真實的 followers 數量）...");
                     
                     // 獲取用戶詳細信息
                     var locationUsers = new List<GitHubUser>();
-                    foreach (var user in qualifiedUsers)
+                    foreach (var searchUser in searchedUsers.Take(30)) // 限制每個地區最多處理 30 個用戶
                     {
-                        var detailResult = await GetUserDetailsAsync(user.Login);
+                        // 檢查 API 請求次數限制
+                        if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
+                        {
+                            Console.WriteLine($"   ⚠️  達到 API 請求限制，停止處理地區 '{location}'");
+                            await _progressService.MarkApiLimitReachedAsync(progress);
+                            return new ApiResponse<List<GitHubUser>>
+                            {
+                                Success = true,
+                                Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
+                                ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
+                            };
+                        }
+
+                        // 檢查是否還可以發送 API 請求
+                        if (!_progressService.IncrementApiRequestCount(progress))
+                        {
+                            await _progressService.MarkApiLimitReachedAsync(progress);
+                            return new ApiResponse<List<GitHubUser>>
+                            {
+                                Success = true,
+                                Data = allUsers.OrderByDescending(u => u.Followers).ToList(),
+                                ErrorMessage = $"已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})"
+                            };
+                        }
+
+                        var detailResult = await GetUserDetailsAsync(searchUser.Login);
                         
                         if (!detailResult.Success)
                         {
@@ -119,7 +173,7 @@ namespace TaiwanGitHubPopularUsers.Services
                                 {
                                     Success = false,
                                     IsRateLimited = true,
-                                    ErrorMessage = "遇到 API 限制，已保存進度",
+                                    ErrorMessage = "遇到 GitHub API 限制，已保存進度",
                                     RateLimitResetTime = detailResult.RateLimitResetTime,
                                     Data = allUsers
                                 };
@@ -127,10 +181,19 @@ namespace TaiwanGitHubPopularUsers.Services
                             continue;
                         }
 
-                        if (detailResult.Data != null && !allUsers.Any(u => u.Id == detailResult.Data.Id))
+                        if (detailResult.Data != null)
                         {
-                            locationUsers.Add(detailResult.Data);
-                            allUsers.Add(detailResult.Data);
+                            // 檢查真實的 followers 數量
+                            if (detailResult.Data.Followers >= 100 && !allUsers.Any(u => u.Id == detailResult.Data.Id))
+                            {
+                                locationUsers.Add(detailResult.Data);
+                                allUsers.Add(detailResult.Data);
+                                Console.WriteLine($"   ✅ {detailResult.Data.Login}: {detailResult.Data.Followers} followers (符合條件)");
+                            }
+                            else if (detailResult.Data.Followers < 100)
+                            {
+                                Console.WriteLine($"   ℹ️  {detailResult.Data.Login}: {detailResult.Data.Followers} followers (不符合條件)");
+                            }
                         }
 
                         // 避免 API 限制
@@ -148,8 +211,11 @@ namespace TaiwanGitHubPopularUsers.Services
                 }
             }
 
-            // 標記完成
-            await _progressService.MarkCompletedAsync(progress);
+            // 如果沒有達到 API 限制且完成了所有地區，標記為完成
+            if (progress.ApiRequestCount < progress.MaxApiRequestsPerRun)
+            {
+                await _progressService.MarkCompletedAsync(progress);
+            }
 
             return new ApiResponse<List<GitHubUser>>
             {
@@ -165,6 +231,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 var searchUrl = $"https://api.github.com/search/users?q=location:{Uri.EscapeDataString(location)}&per_page=100&sort=followers&order=desc";
                 
                 Console.WriteLine($"🔍 正在搜尋地區: {location}");
+                Console.WriteLine($"   🌐 搜尋 URL: {searchUrl}");
                 
                 var response = await _httpClient.GetAsync(searchUrl);
                 
@@ -192,6 +259,8 @@ namespace TaiwanGitHubPopularUsers.Services
                     var json = await response.Content.ReadAsStringAsync();
                     var searchResult = JsonSerializer.Deserialize<GitHubSearchResponse>(json);
                     
+                    Console.WriteLine($"   ✅ API 響應成功，解析到 {searchResult?.Items?.Count ?? 0} 位用戶");
+                    
                     return new ApiResponse<List<GitHubUser>>
                     {
                         Success = true,
@@ -200,6 +269,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 }
                 else
                 {
+                    Console.WriteLine($"   ❌ API 響應失敗: {response.StatusCode} - {response.ReasonPhrase}");
                     return new ApiResponse<List<GitHubUser>>
                     {
                         Success = false,
@@ -209,6 +279,7 @@ namespace TaiwanGitHubPopularUsers.Services
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"   ❌ 搜尋地區 '{location}' 時發生例外: {ex.Message}");
                 return new ApiResponse<List<GitHubUser>>
                 {
                     Success = false,

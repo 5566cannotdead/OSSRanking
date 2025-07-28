@@ -11,6 +11,20 @@ namespace TaiwanGitHubPopularUsers
             Console.WriteLine("=== 台灣 GitHub 知名開發者抓取工具 ===");
             Console.WriteLine($"開始時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             
+            // 檢查是否是診斷模式
+            if (args.Length > 0 && args[0].ToLower() == "--diagnose")
+            {
+                await RunDiagnosticModeAsync();
+                return;
+            }
+            
+            // 檢查是否是影響力報告模式
+            if (args.Length > 0 && args[0].ToLower() == "--influence")
+            {
+                await RunInfluenceReportModeAsync();
+                return;
+            }
+            
             try
             {
                 // 初始化服務
@@ -74,7 +88,7 @@ namespace TaiwanGitHubPopularUsers
                 {
                     if (searchResult.IsRateLimited)
                     {
-                        Console.WriteLine("\n🚫 遇到 API 限制，程序已停止並保存進度");
+                        Console.WriteLine("\n🚫 遇到 GitHub API 限制，程序已停止並保存進度");
                         if (searchResult.RateLimitResetTime.HasValue)
                         {
                             var waitTime = searchResult.RateLimitResetTime.Value - DateTime.UtcNow;
@@ -101,6 +115,33 @@ namespace TaiwanGitHubPopularUsers
 
                 var newUsers = searchResult.Data ?? new List<TaiwanGitHubPopularUsers.Models.GitHubUser>();
                 
+                // 處理 API 請求限制的情況
+                if (!string.IsNullOrEmpty(searchResult.ErrorMessage) && searchResult.ErrorMessage.Contains("API 請求限制"))
+                {
+                    Console.WriteLine($"\n⚠️  {searchResult.ErrorMessage}");
+                    Console.WriteLine("📊 本次運行已完成，將保存已獲取的數據");
+                    
+                    if (newUsers.Count > 0)
+                    {
+                        Console.WriteLine($"✅ 本次運行找到 {newUsers.Count} 位符合條件的用戶");
+                        var allUsers = await userDataService.MergeAndUpdateUsersAsync(newUsers);
+                        userDataService.PrintUserSummary(allUsers);
+                        Console.WriteLine("\n💡 提示: 再次運行程序以繼續搜尋剩餘地區");
+                    }
+                    else
+                    {
+                        Console.WriteLine("📊 本次運行沒有找到新用戶");
+                        var existingUsers = await userDataService.LoadExistingUsersAsync();
+                        userDataService.PrintUserSummary(existingUsers);
+                    }
+                    
+                    Console.WriteLine($"\n✅ 程序執行完成！數據已保存到 Users.json");
+                    Console.WriteLine($"結束時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    Console.WriteLine("\n按任意鍵退出...");
+                    Console.ReadKey();
+                    return;
+                }
+                
                 if (newUsers.Count == 0)
                 {
                     Console.WriteLine("❌ 沒有找到符合條件的新用戶");
@@ -125,7 +166,96 @@ namespace TaiwanGitHubPopularUsers
                 Console.WriteLine($"❌ 程序執行時發生錯誤: {ex.Message}");
                 Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
             }
+        }
 
+        private static async Task RunDiagnosticModeAsync()
+        {
+            Console.WriteLine("\n🔧 === 診斷模式 ===");
+            Console.WriteLine("這個模式將幫助診斷為什麼找不到符合條件的用戶");
+            
+            try
+            {
+                using var diagnosticTool = new DiagnosticTool(GITHUB_TOKEN);
+                
+                Console.WriteLine("\n請選擇診斷選項:");
+                Console.WriteLine("1. 診斷特定地區");
+                Console.WriteLine("2. 診斷多個測試地區");
+                Console.Write("請選擇 (1 或 2): ");
+                
+                var choice = Console.ReadLine();
+                
+                if (choice == "1")
+                {
+                    Console.Write("請輸入要診斷的地區名稱: ");
+                    var location = Console.ReadLine();
+                    if (!string.IsNullOrEmpty(location))
+                    {
+                        await diagnosticTool.DiagnoseLocationSearchAsync(location);
+                    }
+                }
+                else if (choice == "2")
+                {
+                    await diagnosticTool.TestMultipleLocationsAsync();
+                }
+                else
+                {
+                    Console.WriteLine("無效選擇，使用默認測試");
+                    await diagnosticTool.TestMultipleLocationsAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 診斷模式執行錯誤: {ex.Message}");
+            }
+            
+            Console.WriteLine("\n診斷完成！按任意鍵退出...");
+            Console.ReadKey();
+        }
+
+        private static async Task RunInfluenceReportModeAsync()
+        {
+            Console.WriteLine("\n📊 === 台灣 GitHub 影響力報告模式 ===");
+            Console.WriteLine("這個模式將生成包含個人開發者和組織的綜合影響力報告");
+            
+            try
+            {
+                var userDataService = new UserDataService();
+                var organizationService = new OrganizationService(GITHUB_TOKEN);
+                var reportService = new InfluenceReportService();
+
+                Console.WriteLine("\n🔍 載入現有用戶數據...");
+                var users = await userDataService.LoadExistingUsersAsync();
+                
+                if (users.Count == 0)
+                {
+                    Console.WriteLine("❌ 沒有找到用戶數據，請先運行主程序搜集數據");
+                    Console.WriteLine("提示: 運行 'dotnet run' 來搜集用戶數據");
+                    Console.WriteLine("\n按任意鍵退出...");
+                    Console.ReadKey();
+                    return;
+                }
+
+                Console.WriteLine($"✅ 已載入 {users.Count} 位用戶數據");
+
+                Console.WriteLine("\n🏢 搜尋台灣地區的組織...");
+                var organizations = await organizationService.SearchTaiwanOrganizationsAsync(30);
+                
+                Console.WriteLine($"✅ 找到 {organizations.Count} 個組織");
+
+                Console.WriteLine("\n📈 生成影響力報告...");
+                var report = reportService.GenerateInfluenceReport(users, organizations);
+                
+                await reportService.SaveReportAsync(report);
+                reportService.PrintInfluenceReport(report);
+
+                Console.WriteLine($"\n✅ 影響力報告生成完成！");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 影響力報告模式執行錯誤: {ex.Message}");
+                Console.WriteLine($"錯誤詳情: {ex.StackTrace}");
+            }
+            
             Console.WriteLine("\n按任意鍵退出...");
             Console.ReadKey();
         }

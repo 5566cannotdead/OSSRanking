@@ -28,7 +28,10 @@ namespace TaiwanGitHubPopularUsers.Services
                     LastRunTime = DateTime.UtcNow,
                     CompletedLocations = new List<string>(),
                     FailedLocations = new List<string>(),
-                    IsCompleted = false
+                    IsCompleted = false,
+                    ApiRequestCount = 0,
+                    MaxApiRequestsPerRun = 50,
+                    ReachedApiLimit = false
                 };
             }
 
@@ -39,7 +42,12 @@ namespace TaiwanGitHubPopularUsers.Services
                 
                 if (progress != null)
                 {
+                    // 重置每次運行的 API 請求計數
+                    progress.ApiRequestCount = 0;
+                    progress.ReachedApiLimit = false;
+                    
                     Console.WriteLine($"📂 載入運行進度: 已完成 {progress.CompletedLocations.Count} 個地區");
+                    Console.WriteLine($"📊 本次運行 API 請求限制: {progress.MaxApiRequestsPerRun}");
                     
                     if (progress.EncounteredRateLimit && progress.RateLimitResetTime.HasValue)
                     {
@@ -71,7 +79,10 @@ namespace TaiwanGitHubPopularUsers.Services
                 LastRunTime = DateTime.UtcNow,
                 CompletedLocations = new List<string>(),
                 FailedLocations = new List<string>(),
-                IsCompleted = false
+                IsCompleted = false,
+                ApiRequestCount = 0,
+                MaxApiRequestsPerRun = 50,
+                ReachedApiLimit = false
             };
         }
 
@@ -150,6 +161,28 @@ namespace TaiwanGitHubPopularUsers.Services
             await SaveProgressAsync(progress);
         }
 
+        public bool IncrementApiRequestCount(RunProgress progress)
+        {
+            progress.ApiRequestCount++;
+            Console.WriteLine($"📈 API 請求計數: {progress.ApiRequestCount}/{progress.MaxApiRequestsPerRun}");
+            
+            if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
+            {
+                progress.ReachedApiLimit = true;
+                Console.WriteLine($"⚠️  已達到本次運行的 API 請求限制 ({progress.MaxApiRequestsPerRun})");
+                return false; // 達到限制
+            }
+            
+            return true; // 可以繼續
+        }
+
+        public async Task MarkApiLimitReachedAsync(RunProgress progress)
+        {
+            progress.ReachedApiLimit = true;
+            Console.WriteLine($"🔒 已達到 API 請求限制 ({progress.MaxApiRequestsPerRun})，停止本次運行");
+            await SaveProgressAsync(progress);
+        }
+
         public void PrintProgressSummary(RunProgress progress)
         {
             Console.WriteLine("\n=== 運行進度摘要 ===");
@@ -157,11 +190,17 @@ namespace TaiwanGitHubPopularUsers.Services
             Console.WriteLine($"已完成地區: {progress.CompletedLocations.Count}");
             Console.WriteLine($"失敗地區: {progress.FailedLocations.Count}");
             Console.WriteLine($"找到用戶總數: {progress.TotalUsersFound}");
+            Console.WriteLine($"本次 API 請求限制: {progress.MaxApiRequestsPerRun}");
             Console.WriteLine($"運行狀態: {(progress.IsCompleted ? "已完成" : "未完成")}");
+            
+            if (progress.ReachedApiLimit)
+            {
+                Console.WriteLine($"API 請求狀態: 已達到本次限制 ({progress.ApiRequestCount}/{progress.MaxApiRequestsPerRun})");
+            }
             
             if (progress.EncounteredRateLimit)
             {
-                Console.WriteLine($"API 限制狀態: 是");
+                Console.WriteLine($"GitHub API 限制: 是");
                 if (progress.RateLimitResetTime.HasValue)
                 {
                     Console.WriteLine($"限制重置時間: {progress.RateLimitResetTime:yyyy-MM-dd HH:mm:ss} UTC");

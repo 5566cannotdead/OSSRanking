@@ -1,0 +1,25 @@
+{
+  "lastRunTime": "2025-07-28T02:29:18.3790538Z",
+  "completedLocations": [
+    "Taiwan",
+    "Taipei",
+    "New Taipei",
+    "Taoyuan",
+    "Taichung",
+    "Tainan",
+    "Kaohsiung",
+    "Hsinchu",
+    "Keelung",
+    "Chiayi",
+    "Changhua"
+  ],
+  "failedLocations": [],
+  "totalUsersFound": 0,
+  "isCompleted": false,
+  "lastError": null,
+  "rateLimitResetTime": null,
+  "encounteredRateLimit": false,
+  "apiRequestCount": 11,
+  "maxApiRequestsPerRun": 50,
+  "reachedApiLimit": false
+}
