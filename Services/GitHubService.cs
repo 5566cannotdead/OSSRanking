@@ -135,7 +135,14 @@ namespace TaiwanGitHubPopularUsers.Services
                     
                     // 獲取用戶詳細信息
                     var locationUsers = new List<GitHubUser>();
-                    foreach (var searchUser in searchedUsers.Take(30)) // 限制每個地區最多處理 30 個用戶
+                    
+                    // 對於 Taiwan 地區處理更多用戶，其他地區限制為100個
+                    var maxUsersToProcess = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 100 : 100;
+                    var usersToProcess = searchedUsers.Take(maxUsersToProcess);
+                    
+                    Console.WriteLine($"   📥 將處理前 {Math.Min(searchedUsers.Count, maxUsersToProcess)} 位用戶的詳細信息...");
+                    
+                    foreach (var searchUser in usersToProcess)
                     {
                         // 檢查 API 請求次數限制
                         if (progress.ApiRequestCount >= progress.MaxApiRequestsPerRun)
@@ -229,54 +236,88 @@ namespace TaiwanGitHubPopularUsers.Services
         {
             try
             {
-                var searchUrl = $"https://api.github.com/search/users?q=location:{Uri.EscapeDataString(location)}&per_page=100&sort=followers&order=desc";
+                var allUsers = new List<GitHubUser>();
                 
-                Console.WriteLine($"🔍 正在搜尋地區: {location}");
-                Console.WriteLine($"   🌐 搜尋 URL: {searchUrl}");
+                // 判斷是否為 Taiwan，如果是則搜尋3頁，其他地區搜尋1頁
+                var maxPages = location.Equals("Taiwan", StringComparison.OrdinalIgnoreCase) ? 3 : 1;
                 
-                var response = await _httpClient.GetAsync(searchUrl);
+                Console.WriteLine($"🔍 正在搜尋地區: {location} (將搜尋 {maxPages} 頁)");
                 
-                if (response.StatusCode == HttpStatusCode.Forbidden)
+                for (int page = 1; page <= maxPages; page++)
                 {
-                    var rateLimitResetHeader = response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault();
-                    DateTime? resetTime = null;
+                    var searchUrl = $"https://api.github.com/search/users?q=location:{Uri.EscapeDataString(location)}&per_page=100&page={page}&sort=followers&order=desc";
                     
-                    if (long.TryParse(rateLimitResetHeader, out long resetUnixTime))
+                    Console.WriteLine($"   🌐 搜尋第 {page} 頁: {searchUrl}");
+                    
+                    var response = await _httpClient.GetAsync(searchUrl);
+                    
+                    if (response.StatusCode == HttpStatusCode.Forbidden)
                     {
-                        resetTime = DateTimeOffset.FromUnixTimeSeconds(resetUnixTime).UtcDateTime;
-                    }
+                        var rateLimitResetHeader = response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault();
+                        DateTime? resetTime = null;
+                        
+                        if (long.TryParse(rateLimitResetHeader, out long resetUnixTime))
+                        {
+                            resetTime = DateTimeOffset.FromUnixTimeSeconds(resetUnixTime).UtcDateTime;
+                        }
 
-                    return new ApiResponse<List<GitHubUser>>
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            IsRateLimited = true,
+                            ErrorMessage = "API 限制已達到 (403 rate limit exceeded)",
+                            RateLimitResetTime = resetTime
+                        };
+                    }
+                    
+                    if (response.IsSuccessStatusCode)
                     {
-                        Success = false,
-                        IsRateLimited = true,
-                        ErrorMessage = "API 限制已達到 (403 rate limit exceeded)",
-                        RateLimitResetTime = resetTime
-                    };
+                        var json = await response.Content.ReadAsStringAsync();
+                        var searchResult = JsonSerializer.Deserialize<GitHubSearchResponse>(json);
+                        
+                        var pageUsers = searchResult?.Items ?? new List<GitHubUser>();
+                        Console.WriteLine($"   ✅ 第 {page} 頁響應成功，解析到 {pageUsers.Count} 位用戶");
+                        
+                        allUsers.AddRange(pageUsers);
+                        
+                        // 如果這一頁的用戶數少於100，說明沒有更多頁面了
+                        if (pageUsers.Count < 100)
+                        {
+                            Console.WriteLine($"   ℹ️  第 {page} 頁用戶數 < 100，停止搜尋更多頁面");
+                            break;
+                        }
+                        
+                        // 頁面間的延遲，避免 API 限制
+                        if (page < maxPages)
+                        {
+                            await Task.Delay(1000);
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ❌ 第 {page} 頁 API 響應失敗: {response.StatusCode} - {response.ReasonPhrase}");
+                        
+                        // 如果不是第一頁失敗，我們還是返回已獲取的用戶
+                        if (page > 1 && allUsers.Count > 0)
+                        {
+                            break;
+                        }
+                        
+                        return new ApiResponse<List<GitHubUser>>
+                        {
+                            Success = false,
+                            ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                        };
+                    }
                 }
                 
-                if (response.IsSuccessStatusCode)
+                Console.WriteLine($"   📊 地區 '{location}' 總計搜尋到 {allUsers.Count} 位用戶");
+                
+                return new ApiResponse<List<GitHubUser>>
                 {
-                    var json = await response.Content.ReadAsStringAsync();
-                    var searchResult = JsonSerializer.Deserialize<GitHubSearchResponse>(json);
-                    
-                    Console.WriteLine($"   ✅ API 響應成功，解析到 {searchResult?.Items?.Count ?? 0} 位用戶");
-                    
-                    return new ApiResponse<List<GitHubUser>>
-                    {
-                        Success = true,
-                        Data = searchResult?.Items ?? new List<GitHubUser>()
-                    };
-                }
-                else
-                {
-                    Console.WriteLine($"   ❌ API 響應失敗: {response.StatusCode} - {response.ReasonPhrase}");
-                    return new ApiResponse<List<GitHubUser>>
-                    {
-                        Success = false,
-                        ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
-                    };
-                }
+                    Success = true,
+                    Data = allUsers
+                };
             }
             catch (Exception ex)
             {
