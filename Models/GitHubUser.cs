@@ -67,6 +67,7 @@ namespace TaiwanGitHubPopularUsers.Models
         public string? Language { get; set; }
         public bool IsOwner { get; set; } // 是否是倉庫擁有者
         public string? Organization { get; set; } // 如果是組織倉庫
+        public int? ContributorRank { get; set; } // 在組織專案中的貢獻排名（1-5，僅對組織專案有效）
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

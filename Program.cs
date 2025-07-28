@@ -377,18 +377,20 @@ namespace TaiwanGitHubPopularUsers
                 {
                     Console.WriteLine($"\n✅ 專案信息獲取完成:");
                     Console.WriteLine($"   📈 統計:");
-                    Console.WriteLine($"      - 展示專案數: {user.Projects?.Count ?? 0}");
+                    Console.WriteLine($"      - 保存專案數: {user.Projects?.Count ?? 0}");
                     Console.WriteLine($"      - 總 Stars: {user.TotalStars:N0}");
                     Console.WriteLine($"      - 總 Forks: {user.TotalForks:N0}");
                     
                     if (user.Projects != null && user.Projects.Count > 0)
                     {
-                        Console.WriteLine($"\n   🏆 主要專案:");
-                        foreach (var project in user.Projects.Take(5))
+                        // 分類顯示專案
+                        var personalProjects = user.Projects.Where(p => p.IsOwner).ToList();
+                        var contributedProjects = user.Projects.Where(p => !p.IsOwner).ToList();
+                        
+                        Console.WriteLine($"\n   👤 個人專案 ({personalProjects.Count} 個):");
+                        foreach (var project in personalProjects.OrderByDescending(p => p.StargazersCount).Take(5))
                         {
-                            var ownershipIcon = project.IsOwner ? "👤" : "🏢";
-                            var orgInfo = project.Organization != null ? $" ({project.Organization})" : "";
-                            Console.WriteLine($"      {ownershipIcon} {project.Name}{orgInfo}");
+                            Console.WriteLine($"      • {project.Name}");
                             Console.WriteLine($"         - ⭐ {project.StargazersCount:N0} stars, 🍴 {project.ForksCount:N0} forks");
                             Console.WriteLine($"         - 語言: {project.Language ?? "未知"}");
                             if (!string.IsNullOrEmpty(project.Description))
@@ -399,6 +401,31 @@ namespace TaiwanGitHubPopularUsers
                                 Console.WriteLine($"         - 描述: {description}");
                             }
                             Console.WriteLine();
+                        }
+                        
+                        if (contributedProjects.Count > 0)
+                        {
+                            Console.WriteLine($"   🏢 組織貢獻專案 ({contributedProjects.Count} 個):");
+                            foreach (var project in contributedProjects.OrderByDescending(p => p.StargazersCount).Take(5))
+                            {
+                                var rankText = project.ContributorRank.HasValue ? $"第{project.ContributorRank}名貢獻者" : "貢獻者";
+                                Console.WriteLine($"      • {project.Name} @ {project.Organization}");
+                                Console.WriteLine($"         - {rankText}, ⭐ {project.StargazersCount:N0} stars, 🍴 {project.ForksCount:N0} forks");
+                                Console.WriteLine($"         - 語言: {project.Language ?? "未知"}");
+                                if (!string.IsNullOrEmpty(project.Description))
+                                {
+                                    var description = project.Description.Length > 80 
+                                        ? project.Description.Substring(0, 80) + "..."
+                                        : project.Description;
+                                    Console.WriteLine($"         - 描述: {description}");
+                                }
+                                Console.WriteLine();
+                            }
+                        }
+                        
+                        if (user.Projects.Count > 10)
+                        {
+                            Console.WriteLine($"   📝 註: 以上僅顯示前10個專案，共有 {user.Projects.Count} 個專案已保存到 JSON 文件中");
                         }
                     }
                 }

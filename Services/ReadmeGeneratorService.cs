@@ -111,13 +111,15 @@ namespace TaiwanGitHubPopularUsers.Services
                     if (contributedProjects.Count > 0)
                     {
                         contributedInfo += $"<br/>🏢 {contributedProjects.Count} 個專案";
-                        // 顯示前 3 個貢獻的組織專案
+                        // 顯示前 3 個貢獻的組織專案，包含排名信息
                         var topContributed = contributedProjects.OrderByDescending(p => p.StargazersCount).Take(3);
                         foreach (var project in topContributed)
                         {
                             if (project.StargazersCount > 0)
                             {
-                                contributedInfo += $"<br/>• [{project.Name}]({GetProjectUrl(project)}) ({project.StargazersCount:N0}⭐)";
+                                var rankText = project.ContributorRank.HasValue ? $"#{project.ContributorRank}" : "";
+                                var orgText = !string.IsNullOrEmpty(project.Organization) ? $"@{project.Organization}" : "";
+                                contributedInfo += $"<br/>• [{project.Name}]({GetProjectUrl(project)}) {rankText} {orgText} ({project.StargazersCount:N0}⭐)";
                             }
                         }
                     }

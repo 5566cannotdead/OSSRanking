@@ -70,17 +70,33 @@ namespace TaiwanGitHubPopularUsers.Services
                     Console.WriteLine($"   🏆 前五貢獻專案: {topContributedRepos.Data.Count} 個");
                 }
 
-                // 按 Stars 排序並取前五名作為展示
+                // 保存所有專案，按 Stars 排序
                 user.Projects = allProjects
                     .OrderByDescending(p => p.StargazersCount)
-                    .Take(5)
-                    .ToList();
+                    .ToList(); // 保存所有專案，不限制數量
 
-                // 計算所有專案的總計（不限於展示的前五名）
+                // 計算所有專案的總計
                 user.TotalStars = allProjects.Sum(p => p.StargazersCount);
                 user.TotalForks = allProjects.Sum(p => p.ForksCount);
 
-                Console.WriteLine($"   ✅ {user.Login}: 展示前 {user.Projects.Count} 個專案，總計 {user.TotalStars} stars, {user.TotalForks} forks");
+                Console.WriteLine($"   ✅ {user.Login}: 保存 {user.Projects.Count} 個專案，總計 {user.TotalStars} stars, {user.TotalForks} forks");
+                
+                // 顯示專案分類統計
+                var personalProjects = user.Projects.Where(p => p.IsOwner).ToList();
+                var contributedProjects = user.Projects.Where(p => !p.IsOwner).ToList();
+                Console.WriteLine($"   📊 個人專案: {personalProjects.Count} 個 (⭐ {personalProjects.Sum(p => p.StargazersCount)} stars)");
+                Console.WriteLine($"   🏢 組織貢獻專案: {contributedProjects.Count} 個 (⭐ {contributedProjects.Sum(p => p.StargazersCount)} stars)");
+                
+                // 顯示排名前3的組織貢獻專案
+                if (contributedProjects.Count > 0)
+                {
+                    Console.WriteLine($"   🏆 主要組織貢獻:");
+                    foreach (var project in contributedProjects.Take(3))
+                    {
+                        var rankText = project.ContributorRank.HasValue ? $"第{project.ContributorRank}名" : "未知排名";
+                        Console.WriteLine($"      • {project.Name} ({project.Organization}) - {rankText}, ⭐ {project.StargazersCount}");
+                    }
+                }
 
                 return new ApiResponse<bool>
                 {
@@ -342,10 +358,10 @@ namespace TaiwanGitHubPopularUsers.Services
                     {
                         try
                         {
-                            // 檢查用戶是否在前五貢獻者中
-                            var isTopContributor = await IsUserTopContributorAsync(repo.FullName, username);
+                            // 檢查用戶是否在前五貢獻者中並獲取排名
+                            var contributorRank = await GetUserContributorRankAsync(repo.FullName, username);
                             
-                            if (isTopContributor.Success && isTopContributor.Data)
+                            if (contributorRank.Success && contributorRank.Data.HasValue)
                             {
                                 var project = new UserProject
                                 {
@@ -357,15 +373,16 @@ namespace TaiwanGitHubPopularUsers.Services
                                     Language = repo.Language,
                                     IsOwner = false,
                                     Organization = orgName,
+                                    ContributorRank = contributorRank.Data.Value, // 保存排名
                                     CreatedAt = repo.CreatedAt,
                                     UpdatedAt = repo.UpdatedAt
                                 };
                                 
                                 userTopProjects.Add(project);
-                                Console.WriteLine($"         🏆 前五貢獻者: {repo.Name} ({repo.StargazersCount:N0} stars)");
+                                Console.WriteLine($"         🏆 前五貢獻者: {repo.Name} (第{contributorRank.Data}名, {repo.StargazersCount:N0} stars)");
                             }
                             
-                            if (isTopContributor.IsRateLimited)
+                            if (contributorRank.IsRateLimited)
                             {
                                 return new ApiResponse<List<UserProject>>
                                 {
@@ -404,7 +421,7 @@ namespace TaiwanGitHubPopularUsers.Services
         /// <summary>
         /// 檢查用戶是否在特定倉庫的前五貢獻者中（優化版）
         /// </summary>
-        private async Task<ApiResponse<bool>> IsUserTopContributorAsync(string repoFullName, string username)
+        private async Task<ApiResponse<int?>> GetUserContributorRankAsync(string repoFullName, string username)
         {
             try
             {
@@ -414,7 +431,7 @@ namespace TaiwanGitHubPopularUsers.Services
                 if (response.StatusCode == HttpStatusCode.Forbidden)
                 {
                     // 可能是私有倉庫或API限制
-                    return new ApiResponse<bool>
+                    return new ApiResponse<int?>
                     {
                         Success = false,
                         IsRateLimited = true,
@@ -425,10 +442,10 @@ namespace TaiwanGitHubPopularUsers.Services
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
                     // 倉庫不存在或無權限訪問
-                    return new ApiResponse<bool>
+                    return new ApiResponse<int?>
                     {
                         Success = true,
-                        Data = false
+                        Data = null
                     };
                 }
 
@@ -439,38 +456,60 @@ namespace TaiwanGitHubPopularUsers.Services
 
                     if (contributors != null && contributors.Count > 0)
                     {
-                        var isTopContributor = contributors.Any(c => 
+                        var userIndex = contributors.FindIndex(c => 
                             c.Login.Equals(username, StringComparison.OrdinalIgnoreCase));
 
-                        if (isTopContributor)
+                        if (userIndex >= 0)
                         {
-                            var userRank = contributors.FindIndex(c => 
-                                c.Login.Equals(username, StringComparison.OrdinalIgnoreCase)) + 1;
+                            var userRank = userIndex + 1;
                             Console.WriteLine($"           🎯 {username} 在 {repoFullName} 排名第 {userRank}");
+                            return new ApiResponse<int?>
+                            {
+                                Success = true,
+                                Data = userRank
+                            };
                         }
-
-                        return new ApiResponse<bool>
-                        {
-                            Success = true,
-                            Data = isTopContributor
-                        };
                     }
                 }
 
-                return new ApiResponse<bool>
+                return new ApiResponse<int?>
                 {
-                    Success = false,
-                    ErrorMessage = $"HTTP {response.StatusCode}: {response.ReasonPhrase}"
+                    Success = true,
+                    Data = null // 不在前5名
                 };
             }
             catch (Exception ex)
             {
-                return new ApiResponse<bool>
+                return new ApiResponse<int?>
                 {
                     Success = false,
                     ErrorMessage = ex.Message
                 };
             }
+        }
+
+        /// <summary>
+        /// 檢查用戶是否在特定倉庫的前五貢獻者中（優化版）- 保留舊方法以保持兼容性
+        /// </summary>
+        private async Task<ApiResponse<bool>> IsUserTopContributorAsync(string repoFullName, string username)
+        {
+            var rankResult = await GetUserContributorRankAsync(repoFullName, username);
+            
+            if (!rankResult.Success)
+            {
+                return new ApiResponse<bool>
+                {
+                    Success = false,
+                    IsRateLimited = rankResult.IsRateLimited,
+                    ErrorMessage = rankResult.ErrorMessage
+                };
+            }
+
+            return new ApiResponse<bool>
+            {
+                Success = true,
+                Data = rankResult.Data.HasValue
+            };
         }
 
         public void Dispose()
