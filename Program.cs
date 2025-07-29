@@ -141,62 +141,30 @@ namespace TaiwanPopularDevelopers
             foreach (var query in SearchQueries)
             {
                 Console.WriteLine($"搜尋地區: {query}");
-                var users = await SearchGitHubUsers(query);
-                
-                foreach (var user in users)
+                try
                 {
-                    if (!processedUsers.Contains(user.Login))
+                    var users = await SearchGitHubUsers(query);
+                    
+                    foreach (var user in users)
                     {
-                        processedUsers.Add(user.Login);
-                        allUsers.Add(user);
+                        if (!processedUsers.Contains(user.Login))
+                        {
+                            processedUsers.Add(user.Login);
+                            allUsers.Add(user);
+                        }
                     }
-                }
 
-                // 避免API限制，每次搜尋後稍作延遲
-                await Task.Delay(1000);
+                    // 避免API限制，每次搜尋後稍作延遲
+                    await Task.Delay(1000);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"搜尋地區 {query} 時發生嚴重錯誤: {ex.Message}");
+                    Console.WriteLine("程序即將停止");
+                    Environment.Exit(1);
+                }
             }
 
-            // 額外搜尋策略：搜尋台灣相關的關鍵字
-            var additionalQueries = new[]
-            {
-                $"location:Taiwan followers:>{MinFollowers}",
-                $"location:Taipei followers:>{MinFollowers}",
-                $"location:\"New Taipei\" followers:>{MinFollowers}",
-                $"location:Taoyuan followers:>{MinFollowers}",
-                $"location:Taichung followers:>{MinFollowers}",
-                $"location:Tainan followers:>{MinFollowers}",
-                $"location:Kaohsiung followers:>{MinFollowers}",
-                $"location:Hsinchu followers:>{MinFollowers}",
-                $"location:Keelung followers:>{MinFollowers}",
-                $"location:Chiayi followers:>{MinFollowers}",
-                $"location:Changhua followers:>{MinFollowers}",
-                $"location:Yunlin followers:>{MinFollowers}",
-                $"location:Nantou followers:>{MinFollowers}",
-                $"location:Pingtung followers:>{MinFollowers}",
-                $"location:Yilan followers:>{MinFollowers}",
-                $"location:Hualien followers:>{MinFollowers}",
-                $"location:Taitung followers:>{MinFollowers}",
-                $"location:Penghu followers:>{MinFollowers}",
-                $"location:Kinmen followers:>{MinFollowers}",
-                $"location:Matsu followers:>{MinFollowers}"
-            };
-
-            foreach (var query in additionalQueries)
-            {
-                Console.WriteLine($"額外搜尋: {query}");
-                var users = await SearchGitHubUsers(query);
-                
-                foreach (var user in users)
-                {
-                    if (!processedUsers.Contains(user.Login))
-                    {
-                        processedUsers.Add(user.Login);
-                        allUsers.Add(user);
-                    }
-                }
-
-                await Task.Delay(1000);
-            }
 
             Console.WriteLine($"找到 {allUsers.Count} 個台灣地區的GitHub用戶");
 
@@ -255,6 +223,9 @@ namespace TaiwanPopularDevelopers
                 if (!response.IsSuccess)
                 {
                     Console.WriteLine($"搜尋用戶時發生錯誤: {response.ErrorMessage}");
+                    
+                    // 如果是服務不可用錯誤，程序已經在 MakeGitHubApiCall 中處理並退出
+                    // 如果是其他錯誤，跳出循環但不終止程序
                     break;
                 }
 
@@ -506,8 +477,6 @@ namespace TaiwanPopularDevelopers
             {
                 try
                 {
-                    // log url  
-                    Console.WriteLine($"調用 GitHub API: {url}");
                     var response = await httpClient.GetAsync(url);
                     var content = await response.Content.ReadAsStringAsync();
 
@@ -556,8 +525,42 @@ namespace TaiwanPopularDevelopers
                         retryCount++;
                         continue;
                     }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable || 
+                             response.StatusCode == System.Net.HttpStatusCode.BadGateway ||
+                             response.StatusCode == System.Net.HttpStatusCode.InternalServerError)
+                    {
+                        // 服務不可用錯誤，重試
+                        retryCount++;
+                        Console.WriteLine($"GitHub API 服務不可用 ({response.StatusCode})，第 {retryCount} 次重試...");
+                        
+                        if (retryCount >= maxRetries)
+                        {
+                            Console.WriteLine("GitHub API 服務持續不可用，程序即將停止");
+                            Environment.Exit(1);
+                        }
+                        
+                        await Task.Delay(5000 * retryCount); // 遞增等待時間
+                        continue;
+                    }
                     else
                     {
+                        // 檢查是否是服務不可用的錯誤訊息
+                        if (content.Contains("No server is currently available") || 
+                            content.Contains("service your request"))
+                        {
+                            retryCount++;
+                            Console.WriteLine($"GitHub API 服務不可用，第 {retryCount} 次重試...");
+                            
+                            if (retryCount >= maxRetries)
+                            {
+                                Console.WriteLine("GitHub API 服務持續不可用，程序即將停止");
+                                Environment.Exit(1);
+                            }
+                            
+                            await Task.Delay(5000 * retryCount); // 遞增等待時間
+                            continue;
+                        }
+                        
                         return new GitHubApiResponse<T>
                         {
                             IsSuccess = false,
@@ -565,9 +568,37 @@ namespace TaiwanPopularDevelopers
                         };
                     }
                 }
+                catch (HttpRequestException ex)
+                {
+                    retryCount++;
+                    Console.WriteLine($"網路連線問題: {ex.Message}，第 {retryCount} 次重試...");
+                    
+                    if (retryCount >= maxRetries)
+                    {
+                        Console.WriteLine("網路連線持續有問題，程序即將停止");
+                        Environment.Exit(1);
+                    }
+                    
+                    await Task.Delay(5000 * retryCount); // 遞增等待時間
+                }
+                catch (TaskCanceledException ex)
+                {
+                    retryCount++;
+                    Console.WriteLine($"請求超時: {ex.Message}，第 {retryCount} 次重試...");
+                    
+                    if (retryCount >= maxRetries)
+                    {
+                        Console.WriteLine("請求持續超時，程序即將停止");
+                        Environment.Exit(1);
+                    }
+                    
+                    await Task.Delay(5000 * retryCount); // 遞增等待時間
+                }
                 catch (Exception ex)
                 {
                     retryCount++;
+                    Console.WriteLine($"API 調用異常: {ex.Message}，第 {retryCount} 次重試...");
+                    
                     if (retryCount >= maxRetries)
                     {
                         return new GitHubApiResponse<T>
