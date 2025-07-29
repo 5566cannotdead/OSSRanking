@@ -103,21 +103,51 @@ namespace TaiwanPopularDevelopers
 
             Console.WriteLine("正在搜尋台灣地區的GitHub用戶...");
 
-            // 設定GitHub API headers
+            // 清理並設定基本 GitHub API headers
+            ClearHttpClientHeaders();
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Taiwan-Popular-Developers");
             httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
-            
+
+            // 如果有 Token，設定授權並驗證其有效性
             if (!string.IsNullOrEmpty(githubToken))
             {
-                // 支援新的 Bearer token 格式，也兼容舊的 token 格式
-                if (githubToken.StartsWith("ghp_") || githubToken.StartsWith("github_pat_"))
+                try
                 {
-                    httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {githubToken}");
+                    // 支援新的 Bearer token 格式，也兼容舊的 token 格式
+                    if (githubToken.StartsWith("ghp_") || githubToken.StartsWith("github_pat_"))
+                    {
+                        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {githubToken}");
+                    }
+                    else
+                    {
+                        httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
+                    }
+                    
+                    Console.WriteLine("正在驗證 GitHub API Token...");
+                    var tokenValid = await ValidateGitHubToken();
+                    if (!tokenValid)
+                    {
+                        Console.WriteLine("GitHub API Token 驗證失敗，將使用匿名模式");
+                        httpClient.DefaultRequestHeaders.Remove("Authorization");
+                        githubToken = null;
+                    }
+                    else
+                    {
+                        Console.WriteLine("GitHub API Token 驗證成功");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
+                    Console.WriteLine($"設定 Token 時發生錯誤: {ex.Message}，將使用匿名模式");
+                    ClearHttpClientHeaders();
+                    httpClient.DefaultRequestHeaders.Add("User-Agent", "Taiwan-Popular-Developers");
+                    httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
+                    githubToken = null;
                 }
+            }
+
+            if (!string.IsNullOrEmpty(githubToken))
+            {
                 Console.WriteLine("已設定 GitHub API 授權");
             }
             else
@@ -249,7 +279,7 @@ namespace TaiwanPopularDevelopers
                     break;
                 }
 
-                var items = response.Data.items;
+                var items = response.Data?.items;
                 if (items == null || items.Count == 0)
                     break;
 
@@ -575,6 +605,48 @@ namespace TaiwanPopularDevelopers
                 IsSuccess = false,
                 ErrorMessage = "達到最大重試次數"
             };
+        }
+
+        static async Task<bool> ValidateGitHubToken()
+        {
+            try
+            {
+                // 直接使用 httpClient 進行驗證，不使用 MakeGitHubApiCall 避免重複錯誤處理
+                var response = await httpClient.GetAsync("https://api.github.com/user");
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Token 驗證失敗: {content}");
+                    return false;
+                }
+                else
+                {
+                    Console.WriteLine($"Token 驗證遇到問題: {response.StatusCode}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Token 驗證時發生異常: {ex.Message}");
+                return false;
+            }
+        }
+
+        static void ClearHttpClientHeaders()
+        {
+            try
+            {
+                httpClient.DefaultRequestHeaders.Clear();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"清理 HTTP headers 時發生異常: {ex.Message}");
+            }
         }
 
         static bool IsTaiwanLocation(string location)
