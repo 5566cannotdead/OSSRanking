@@ -1,5 +1,9 @@
 ﻿# 台灣知名GitHub用戶排名
 
+
+## [好讀HTML版本](https://5566cannotdead.github.io/taiwan_popular_developers)
+
+
 > 本排名基於以下指標計算：
 > - 個人追蹤數量
 > - 個人專案Star數量
