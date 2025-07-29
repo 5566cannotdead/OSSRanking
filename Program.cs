@@ -176,7 +176,7 @@ namespace TaiwanPopularDevelopers
             var processedUsers = new HashSet<string>();
 
             // 載入已完成的用戶資料
-            Console.WriteLine("正在載入已完成的用戶資料...");
+            Console.WriteLine("正在載入已完成的用戶資719674961料...");
             var existingUsers = await LoadExistingUsers();
             foreach (var existingUser in existingUsers)
             {
@@ -282,7 +282,7 @@ namespace TaiwanPopularDevelopers
         {
             var users = new List<GitHubUser>();
             int page = 1;
-            const int maxPages = 100; // 每個查詢最多100頁
+            const int maxPages = 1000; // 每個查詢最多100頁
             bool hasUsersWith50PlusFollowers = true;
 
             while (page <= maxPages && hasUsersWith50PlusFollowers)
@@ -320,10 +320,10 @@ namespace TaiwanPopularDevelopers
                         HtmlUrl = item.html_url ?? ""
                     };
                     users.Add(user);
-                    if (followers >= MinFollowers)
-                    {
+                    //if (followers >= MinFollowers)
+                    //{
                         hasUsersWith50PlusFollowers = true;
-                    }
+                    //}
                 }
 
                 page++;
