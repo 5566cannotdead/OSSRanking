@@ -113,28 +113,7 @@ namespace TaiwanPopularDevelopers
             {
                 try
                 {
-                    // 支援新的 Bearer token 格式，也兼容舊的 token 格式
-                    if (githubToken.StartsWith("ghp_") || githubToken.StartsWith("github_pat_"))
-                    {
-                        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {githubToken}");
-                    }
-                    else
-                    {
-                        httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
-                    }
-                    
-                    Console.WriteLine("正在驗證 GitHub API Token...");
-                    var tokenValid = await ValidateGitHubToken();
-                    if (!tokenValid)
-                    {
-                        Console.WriteLine("GitHub API Token 驗證失敗，將使用匿名模式");
-                        httpClient.DefaultRequestHeaders.Remove("Authorization");
-                        githubToken = null;
-                    }
-                    else
-                    {
-                        Console.WriteLine("GitHub API Token 驗證成功");
-                    }
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
                 }
                 catch (Exception ex)
                 {
@@ -527,6 +506,8 @@ namespace TaiwanPopularDevelopers
             {
                 try
                 {
+                    // log url  
+                    Console.WriteLine($"調用 GitHub API: {url}");
                     var response = await httpClient.GetAsync(url);
                     var content = await response.Content.ReadAsStringAsync();
 
