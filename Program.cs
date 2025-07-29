@@ -22,6 +22,7 @@ namespace TaiwanPopularDevelopers
         public double Score { get; set; }
         public List<Repository> TopRepositories { get; set; } = new List<Repository>();
         public List<Repository> TopOrganizationRepositories { get; set; } = new List<Repository>();
+        public List<Repository> AllRepositories { get; set; } = new List<Repository>();
     }
 
     public class Repository
@@ -50,6 +51,7 @@ namespace TaiwanPopularDevelopers
     public class Program
     {
         private static readonly HttpClient httpClient = new HttpClient();
+        private static string? githubToken;
         private static readonly string[] TaiwanLocations = {
             "Taiwan", "Taipei", "New Taipei", "Taoyuan", "Taichung", "Tainan", "Kaohsiung", 
             "Hsinchu", "Keelung", "Chiayi", "Changhua", "Yunlin", "Nantou", "Pingtung", 
@@ -82,11 +84,32 @@ namespace TaiwanPopularDevelopers
         static async Task Main(string[] args)
         {
             Console.WriteLine("台灣知名GitHub用戶排名系統");
+            Console.WriteLine("正在讀取GitHub API Token...");
+
+            // 讀取GitHub API Token
+            try
+            {
+                githubToken = await File.ReadAllTextAsync(@"C:\Token");
+                githubToken = githubToken.Trim();
+                Console.WriteLine("GitHub API Token 已載入");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"警告: 無法讀取GitHub API Token: {ex.Message}");
+                Console.WriteLine("將使用匿名API調用（限制較多）");
+                githubToken = null;
+            }
+
             Console.WriteLine("正在搜尋台灣地區的GitHub用戶...");
 
             // 設定GitHub API headers
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Taiwan-Popular-Developers");
             httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github.v3+json");
+            
+            if (!string.IsNullOrEmpty(githubToken))
+            {
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
+            }
 
             var allUsers = new List<GitHubUser>();
             var processedUsers = new HashSet<string>();
@@ -110,24 +133,81 @@ namespace TaiwanPopularDevelopers
                 await Task.Delay(1000);
             }
 
+            // 額外搜尋策略：搜尋台灣相關的關鍵字
+            var additionalQueries = new[]
+            {
+                "location:Taiwan followers:>50",
+                "location:Taipei followers:>50",
+                "location:\"New Taipei\" followers:>50",
+                "location:Taoyuan followers:>50",
+                "location:Taichung followers:>50",
+                "location:Tainan followers:>50",
+                "location:Kaohsiung followers:>50",
+                "location:Hsinchu followers:>50",
+                "location:Keelung followers:>50",
+                "location:Chiayi followers:>50",
+                "location:Changhua followers:>50",
+                "location:Yunlin followers:>50",
+                "location:Nantou followers:>50",
+                "location:Pingtung followers:>50",
+                "location:Yilan followers:>50",
+                "location:Hualien followers:>50",
+                "location:Taitung followers:>50",
+                "location:Penghu followers:>50",
+                "location:Kinmen followers:>50",
+                "location:Matsu followers:>50"
+            };
+
+            foreach (var query in additionalQueries)
+            {
+                Console.WriteLine($"額外搜尋: {query}");
+                var users = await SearchGitHubUsers(query);
+                
+                foreach (var user in users)
+                {
+                    if (!processedUsers.Contains(user.Login))
+                    {
+                        processedUsers.Add(user.Login);
+                        allUsers.Add(user);
+                    }
+                }
+
+                await Task.Delay(1000);
+            }
+
             Console.WriteLine($"找到 {allUsers.Count} 個台灣地區的GitHub用戶");
 
-            // 計算每個用戶的分數
-            foreach (var user in allUsers)
+            // 計算每個用戶的分數並獲取詳細資訊
+            for (int i = 0; i < allUsers.Count; i++)
             {
+                var user = allUsers[i];
+                Console.WriteLine($"處理用戶 {i + 1}/{allUsers.Count}: {user.Login}");
                 await CalculateUserScore(user);
+                
+                // 避免API限制
+                await Task.Delay(500);
             }
 
             // 按分數排序
             var rankedUsers = allUsers.OrderByDescending(u => u.Score).ToList();
 
+            // 儲存到JSON檔案
+            var jsonData = new
+            {
+                GeneratedAt = DateTime.Now,
+                TotalUsers = rankedUsers.Count,
+                Users = rankedUsers
+            };
+            
+            var jsonString = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
+            await File.WriteAllTextAsync("Users.json", jsonString, Encoding.UTF8);
+            Console.WriteLine("用戶資料已儲存到 Users.json");
+
             // 生成Markdown
             var markdown = GenerateMarkdown(rankedUsers);
+            await File.WriteAllTextAsync("Readme.md", markdown, Encoding.UTF8);
             
-            // 儲存到檔案
-            await File.WriteAllTextAsync("taiwan_popular_developers.md", markdown, Encoding.UTF8);
-            
-            Console.WriteLine("排名已生成並儲存到 taiwan_popular_developers.md");
+            Console.WriteLine("排名已生成並儲存到 Readme.md");
             Console.WriteLine($"前10名用戶:");
             for (int i = 0; i < Math.Min(10, rankedUsers.Count); i++)
             {
@@ -140,9 +220,10 @@ namespace TaiwanPopularDevelopers
         {
             var users = new List<GitHubUser>();
             int page = 1;
-            const int maxPages = 10; // 每個查詢最多10頁
+            const int maxPages = 100; // 每個查詢最多100頁
+            bool hasUsersWith50PlusFollowers = true;
 
-            while (page <= maxPages)
+            while (page <= maxPages && hasUsersWith50PlusFollowers)
             {
                 var url = $"https://api.github.com/search/users?q={Uri.EscapeDataString(query)}&sort=followers&order=desc&page={page}&per_page=100";
                 
@@ -158,14 +239,16 @@ namespace TaiwanPopularDevelopers
                 if (items == null || items.Count == 0)
                     break;
 
+                hasUsersWith50PlusFollowers = false;
                 foreach (var item in items)
                 {
+                    var followers = item.followers ?? 0;
                     var user = new GitHubUser
                     {
                         Login = item.login,
                         Name = item.name ?? item.login,
                         Location = item.location ?? "",
-                        Followers = item.followers ?? 0,
+                        Followers = followers,
                         PublicRepos = item.public_repos ?? 0,
                         AvatarUrl = item.avatar_url ?? "",
                         HtmlUrl = item.html_url ?? ""
@@ -175,6 +258,12 @@ namespace TaiwanPopularDevelopers
                     if (IsTaiwanLocation(user.Location))
                     {
                         users.Add(user);
+                        
+                        // 如果這個用戶有50個以上追蹤者，繼續搜尋
+                        if (followers >= 50)
+                        {
+                            hasUsersWith50PlusFollowers = true;
+                        }
                     }
                 }
 
@@ -187,8 +276,6 @@ namespace TaiwanPopularDevelopers
 
         static async Task CalculateUserScore(GitHubUser user)
         {
-            Console.WriteLine($"計算用戶分數: {user.Login}");
-
             // 獲取用戶詳細資訊
             var userDetail = await GetUserDetail(user.Login);
             if (userDetail != null)
@@ -198,9 +285,12 @@ namespace TaiwanPopularDevelopers
                 user.CreatedAt = userDetail.CreatedAt;
             }
 
-            // 獲取用戶的頂級倉庫
-            var repositories = await GetUserRepositories(user.Login);
-            var topRepos = repositories.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
+            // 獲取用戶的所有倉庫（包括五顆星以下的）
+            var allRepositories = await GetAllUserRepositories(user.Login);
+            user.AllRepositories = allRepositories;
+
+            // 獲取用戶的頂級倉庫（前五名）
+            var topRepos = allRepositories.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
             user.TopRepositories = topRepos;
 
             // 獲取用戶參與的組織倉庫
@@ -215,10 +305,10 @@ namespace TaiwanPopularDevelopers
             score += user.Followers * 1.0;
             
             // 個人專案star + fork
-            score += user.TopRepositories.Sum(r => r.StargazersCount * 2.0 + r.ForksCount * 1.0);
+            score += user.TopRepositories.Sum(r => r.StargazersCount * 1.0 + r.ForksCount * 1.0);
             
             // 組織貢獻個人能排在前五名的專案 star + fork
-            score += user.TopOrganizationRepositories.Sum(r => r.StargazersCount * 1.5 + r.ForksCount * 0.75);
+            score += user.TopOrganizationRepositories.Sum(r => r.StargazersCount * 1.0 + r.ForksCount * 1.0);
 
             user.Score = score;
         }
@@ -243,6 +333,46 @@ namespace TaiwanPopularDevelopers
                 HtmlUrl = response.Data.html_url ?? "",
                 CreatedAt = response.Data.created_at != null ? DateTime.Parse(response.Data.created_at.ToString()) : DateTime.MinValue
             };
+        }
+
+        static async Task<List<Repository>> GetAllUserRepositories(string username)
+        {
+            var repositories = new List<Repository>();
+            int page = 1;
+
+            while (page <= 10) // 最多10頁，獲取更多倉庫
+            {
+                var url = $"https://api.github.com/users/{username}/repos?page={page}&per_page=100&sort=stars&direction=desc";
+                var response = await MakeGitHubApiCall<List<dynamic>>(url);
+                
+                if (!response.IsSuccess)
+                    break;
+
+                if (response.Data.Count == 0)
+                    break;
+
+                foreach (var repo in response.Data)
+                {
+                    repositories.Add(new Repository
+                    {
+                        Name = repo.name,
+                        FullName = repo.full_name,
+                        Description = repo.description ?? "",
+                        StargazersCount = repo.stargazers_count ?? 0,
+                        ForksCount = repo.forks_count ?? 0,
+                        HtmlUrl = repo.html_url ?? "",
+                        Language = repo.language ?? "",
+                        IsFork = repo.fork ?? false,
+                        OwnerLogin = repo.owner?.login ?? "",
+                        IsOrganization = false
+                    });
+                }
+
+                page++;
+                await Task.Delay(100);
+            }
+
+            return repositories;
         }
 
         static async Task<List<Repository>> GetUserRepositories(string username)
@@ -306,7 +436,7 @@ namespace TaiwanPopularDevelopers
                 
                 if (orgReposResponse.IsSuccess)
                 {
-                    foreach (var repo in orgReposResponse.Data.Take(10)) // 每個組織最多10個倉庫
+                    foreach (var repo in orgReposResponse.Data.Take(20)) // 每個組織最多20個倉庫
                     {
                         // 檢查用戶是否為貢獻者
                         var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors";
