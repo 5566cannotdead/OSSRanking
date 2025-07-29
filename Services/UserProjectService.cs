@@ -163,6 +163,7 @@ namespace TaiwanGitHubPopularUsers.Services
                                 Language = r.Language,
                                 IsOwner = true,
                                 Organization = null,
+                                ContributorRank = null, // 個人專案不需要排名
                                 CreatedAt = r.CreatedAt,
                                 UpdatedAt = r.UpdatedAt
                             }).ToList();
