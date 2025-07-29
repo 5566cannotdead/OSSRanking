@@ -53,33 +53,28 @@ namespace TaiwanPopularDevelopers
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
         private static readonly int MinFollowers = 2000; // 最低追蹤者數量門檻
-        private static readonly string[] TaiwanLocations = {
-            "Taiwan", "Taipei", "New Taipei", "Taoyuan", "Taichung", "Tainan", "Kaohsiung", 
-            "Hsinchu", "Keelung", "Chiayi", "Changhua", "Yunlin", "Nantou", "Pingtung", 
-            "Yilan", "Hualien", "Taitung", "Penghu", "Kinmen", "Matsu"
-        };
 
         private static readonly string[] SearchQueries = {
-            "location:Taiwan",
-            "location:Taipei",
-            "location:\"New Taipei\"",
-            "location:Taoyuan",
-            "location:Taichung",
-            "location:Tainan",
-            "location:Kaohsiung",
-            "location:Hsinchu",
-            "location:Keelung",
-            "location:Chiayi",
-            "location:Changhua",
-            "location:Yunlin",
-            "location:Nantou",
-            "location:Pingtung",
-            "location:Yilan",
-            "location:Hualien",
-            "location:Taitung",
-            "location:Penghu",
-            "location:Kinmen",
-            "location:Matsu"
+            $"followers:>{MinFollowers}+location:Taiwan",
+           $"followers:>{MinFollowers}+location:Taipei",
+           $"followers:>{MinFollowers}+location:Kaohsiung",
+           //$"followers:>{MinFollowers}+location:\"New Taipei\"",
+           //$"followers:>{MinFollowers}+location:Taoyuan",
+           //$"followers:>{MinFollowers}+location:Taichung",
+           //$"followers:>{MinFollowers}+location:Tainan",
+           //$"followers:>{MinFollowers}+location:Hsinchu",
+           //$"followers:>{MinFollowers}+location:Keelung",
+           //$"followers:>{MinFollowers}+location:Chiayi",
+           //$"followers:>{MinFollowers}+location:Changhua",
+           //$"followers:>{MinFollowers}+location:Yunlin",
+           //$"followers:>{MinFollowers}+location:Nantou",
+           //$"followers:>{MinFollowers}+location:Pingtung",
+           //$"followers:>{MinFollowers}+location:Yilan",
+           //$"followers:>{MinFollowers}+location:Hualien",
+           //$"followers:>{MinFollowers}+location:Taitung",
+           //$"followers:>{MinFollowers}+location:Penghu",
+           //$"followers:>{MinFollowers}+location:Kinmen",
+           //$"followers:>{MinFollowers}+location:Matsu"
         };
 
         static async Task Main(string[] args)
@@ -216,7 +211,8 @@ namespace TaiwanPopularDevelopers
 
             while (page <= maxPages && hasUsersWith50PlusFollowers)
             {
-                var url = $"https://api.github.com/search/users?q={Uri.EscapeDataString(query)}&sort=followers&order=desc&page={page}&per_page=100";
+                //增加 url follower > 最小追踪数量
+                var url = $"https://api.github.com/search/users?q={query}&sort=followers&order=desc&page={page}&per_page=100";
                 
                 var response = await MakeGitHubApiCall<dynamic>(url);
                 
@@ -247,17 +243,10 @@ namespace TaiwanPopularDevelopers
                         AvatarUrl = item.avatar_url ?? "",
                         HtmlUrl = item.html_url ?? ""
                     };
-
-                    // 檢查是否為台灣地區用戶
-                    if (IsTaiwanLocation(user.Location))
+                    users.Add(user);
+                    if (followers >= MinFollowers)
                     {
-                        users.Add(user);
-                        
-                        // 如果這個用戶有指定數量以上追蹤者，繼續搜尋
-                        if (followers >= MinFollowers)
-                        {
-                            hasUsersWith50PlusFollowers = true;
-                        }
+                        hasUsersWith50PlusFollowers = true;
                     }
                 }
 
@@ -439,6 +428,11 @@ namespace TaiwanPopularDevelopers
                         if (contributorsResponse.IsSuccess)
                         {
                             // 檢查用戶是否在前五名貢獻者中
+                            if(contributorsResponse.Data==null)
+                            {
+                                Console.WriteLine($"警告: 無法獲取 {repo.full_name} 的貢獻者資料，可能是API限制或倉庫不存在");
+                                continue;
+                            }
                             var isTopFiveContributor = contributorsResponse.Data.Any(c => c.login == username);
                             if (isTopFiveContributor)
                             {
@@ -661,15 +655,6 @@ namespace TaiwanPopularDevelopers
             }
         }
 
-        static bool IsTaiwanLocation(string location)
-        {
-            if (string.IsNullOrWhiteSpace(location))
-                return false;
-
-            var locationLower = location.ToLower();
-            return TaiwanLocations.Any(taiwanLocation => 
-                locationLower.Contains(taiwanLocation.ToLower()));
-        }
 
         static string GenerateMarkdown(List<GitHubUser> users)
         {
