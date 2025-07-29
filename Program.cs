@@ -52,29 +52,29 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
-        private static readonly int MinFollowers = 6000; // 最低追蹤者數量門檻
+        private static readonly int MinFollowers = 100; // 最低追蹤者數量門檻
 
         private static readonly string[] SearchQueries = {
             $"followers:>{MinFollowers}+location:Taiwan",
            $"followers:>{MinFollowers}+location:Taipei",
            $"followers:>{MinFollowers}+location:Kaohsiung",
-           //$"followers:>{MinFollowers}+location:\"New Taipei\"",
-           //$"followers:>{MinFollowers}+location:Taoyuan",
-           //$"followers:>{MinFollowers}+location:Taichung",
-           //$"followers:>{MinFollowers}+location:Tainan",
-           //$"followers:>{MinFollowers}+location:Hsinchu",
-           //$"followers:>{MinFollowers}+location:Keelung",
-           //$"followers:>{MinFollowers}+location:Chiayi",
-           //$"followers:>{MinFollowers}+location:Changhua",
-           //$"followers:>{MinFollowers}+location:Yunlin",
-           //$"followers:>{MinFollowers}+location:Nantou",
-           //$"followers:>{MinFollowers}+location:Pingtung",
-           //$"followers:>{MinFollowers}+location:Yilan",
-           //$"followers:>{MinFollowers}+location:Hualien",
-           //$"followers:>{MinFollowers}+location:Taitung",
-           //$"followers:>{MinFollowers}+location:Penghu",
-           //$"followers:>{MinFollowers}+location:Kinmen",
-           //$"followers:>{MinFollowers}+location:Matsu"
+           $"followers:>{MinFollowers}+location:\"New Taipei\"",
+           $"followers:>{MinFollowers}+location:Taoyuan",
+           $"followers:>{MinFollowers}+location:Taichung",
+           $"followers:>{MinFollowers}+location:Tainan",
+           $"followers:>{MinFollowers}+location:Hsinchu",
+           $"followers:>{MinFollowers}+location:Keelung",
+           $"followers:>{MinFollowers}+location:Chiayi",
+           $"followers:>{MinFollowers}+location:Changhua",
+           $"followers:>{MinFollowers}+location:Yunlin",
+           $"followers:>{MinFollowers}+location:Nantou",
+           $"followers:>{MinFollowers}+location:Pingtung",
+           $"followers:>{MinFollowers}+location:Yilan",
+           $"followers:>{MinFollowers}+location:Hualien",
+           $"followers:>{MinFollowers}+location:Taitung",
+           $"followers:>{MinFollowers}+location:Penghu",
+           $"followers:>{MinFollowers}+location:Kinmen",
+           $"followers:>{MinFollowers}+location:Matsu"
         };
 
         static async Task Main(string[] args)
