@@ -52,6 +52,7 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
+        private static readonly int MinFollowers = 2000; // 最低追蹤者數量門檻
         private static readonly string[] TaiwanLocations = {
             "Taiwan", "Taipei", "New Taipei", "Taoyuan", "Taichung", "Tainan", "Kaohsiung", 
             "Hsinchu", "Keelung", "Chiayi", "Changhua", "Yunlin", "Nantou", "Pingtung", 
@@ -108,7 +109,20 @@ namespace TaiwanPopularDevelopers
             
             if (!string.IsNullOrEmpty(githubToken))
             {
-                httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
+                // 支援新的 Bearer token 格式，也兼容舊的 token 格式
+                if (githubToken.StartsWith("ghp_") || githubToken.StartsWith("github_pat_"))
+                {
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {githubToken}");
+                }
+                else
+                {
+                    httpClient.DefaultRequestHeaders.Add("Authorization", $"token {githubToken}");
+                }
+                Console.WriteLine("已設定 GitHub API 授權");
+            }
+            else
+            {
+                Console.WriteLine("使用匿名模式（API 限制較多）");
             }
 
             var allUsers = new List<GitHubUser>();
@@ -136,26 +150,26 @@ namespace TaiwanPopularDevelopers
             // 額外搜尋策略：搜尋台灣相關的關鍵字
             var additionalQueries = new[]
             {
-                "location:Taiwan followers:>50",
-                "location:Taipei followers:>50",
-                "location:\"New Taipei\" followers:>50",
-                "location:Taoyuan followers:>50",
-                "location:Taichung followers:>50",
-                "location:Tainan followers:>50",
-                "location:Kaohsiung followers:>50",
-                "location:Hsinchu followers:>50",
-                "location:Keelung followers:>50",
-                "location:Chiayi followers:>50",
-                "location:Changhua followers:>50",
-                "location:Yunlin followers:>50",
-                "location:Nantou followers:>50",
-                "location:Pingtung followers:>50",
-                "location:Yilan followers:>50",
-                "location:Hualien followers:>50",
-                "location:Taitung followers:>50",
-                "location:Penghu followers:>50",
-                "location:Kinmen followers:>50",
-                "location:Matsu followers:>50"
+                $"location:Taiwan followers:>{MinFollowers}",
+                $"location:Taipei followers:>{MinFollowers}",
+                $"location:\"New Taipei\" followers:>{MinFollowers}",
+                $"location:Taoyuan followers:>{MinFollowers}",
+                $"location:Taichung followers:>{MinFollowers}",
+                $"location:Tainan followers:>{MinFollowers}",
+                $"location:Kaohsiung followers:>{MinFollowers}",
+                $"location:Hsinchu followers:>{MinFollowers}",
+                $"location:Keelung followers:>{MinFollowers}",
+                $"location:Chiayi followers:>{MinFollowers}",
+                $"location:Changhua followers:>{MinFollowers}",
+                $"location:Yunlin followers:>{MinFollowers}",
+                $"location:Nantou followers:>{MinFollowers}",
+                $"location:Pingtung followers:>{MinFollowers}",
+                $"location:Yilan followers:>{MinFollowers}",
+                $"location:Hualien followers:>{MinFollowers}",
+                $"location:Taitung followers:>{MinFollowers}",
+                $"location:Penghu followers:>{MinFollowers}",
+                $"location:Kinmen followers:>{MinFollowers}",
+                $"location:Matsu followers:>{MinFollowers}"
             };
 
             foreach (var query in additionalQueries)
@@ -259,8 +273,8 @@ namespace TaiwanPopularDevelopers
                     {
                         users.Add(user);
                         
-                        // 如果這個用戶有50個以上追蹤者，繼續搜尋
-                        if (followers >= 50)
+                        // 如果這個用戶有指定數量以上追蹤者，繼續搜尋
+                        if (followers >= MinFollowers)
                         {
                             hasUsersWith50PlusFollowers = true;
                         }
@@ -438,14 +452,15 @@ namespace TaiwanPopularDevelopers
                 {
                     foreach (var repo in orgReposResponse.Data.Take(20)) // 每個組織最多20個倉庫
                     {
-                        // 檢查用戶是否為貢獻者
-                        var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors";
+                        // 檢查用戶是否為前五名貢獻者
+                        var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors?per_page=5";
                         var contributorsResponse = await MakeGitHubApiCall<List<dynamic>>(contributorsUrl);
                         
                         if (contributorsResponse.IsSuccess)
                         {
-                            var isContributor = contributorsResponse.Data.Any(c => c.login == username);
-                            if (isContributor)
+                            // 檢查用戶是否在前五名貢獻者中
+                            var isTopFiveContributor = contributorsResponse.Data.Any(c => c.login == username);
+                            if (isTopFiveContributor)
                             {
                                 repositories.Add(new Repository
                                 {
@@ -494,6 +509,21 @@ namespace TaiwanPopularDevelopers
                             IsSuccess = true,
                             RemainingRequests = int.Parse(response.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault() ?? "0"),
                             ResetTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault() ?? "0")).DateTime
+                        };
+                    }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        // 401 Unauthorized - Token 問題
+                        var errorMsg = "GitHub API Token 驗證失敗。請檢查：\n" +
+                                      "1. Token 是否正確（應以 ghp_ 或 github_pat_ 開頭）\n" +
+                                      "2. Token 是否已過期\n" +
+                                      "3. Token 是否有適當的權限（至少需要 public_repo 權限）\n" +
+                                      "4. 請到 https://github.com/settings/tokens 檢查或重新產生 Token";
+                        
+                        return new GitHubApiResponse<T>
+                        {
+                            IsSuccess = false,
+                            ErrorMessage = errorMsg
                         };
                     }
                     else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
