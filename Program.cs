@@ -176,7 +176,7 @@ namespace TaiwanPopularDevelopers
             var processedUsers = new HashSet<string>();
 
             // 載入已完成的用戶資料
-            Console.WriteLine("正在載入已完成的用戶資719674961料...");
+            Console.WriteLine("正在載入已完成的用戶資料...");
             var existingUsers = await LoadExistingUsers();
             foreach (var existingUser in existingUsers)
             {
@@ -269,7 +269,11 @@ namespace TaiwanPopularDevelopers
             var markdown = GenerateMarkdown(rankedUsers);
             await File.WriteAllTextAsync("Readme.md", markdown, Encoding.UTF8);
             
-            Console.WriteLine("排名已生成並儲存到 Readme.md");
+            // 生成GitHub Pages HTML
+            var html = GenerateHtml(rankedUsers);
+            await File.WriteAllTextAsync("index.html", html, Encoding.UTF8);
+            
+            Console.WriteLine("排名已生成並儲存到 Readme.md 和 index.html");
             Console.WriteLine($"前10名用戶:");
             for (int i = 0; i < Math.Min(10, rankedUsers.Count); i++)
             {
@@ -853,6 +857,78 @@ namespace TaiwanPopularDevelopers
                 sb.AppendLine($"| {rank} | {totalInfluence} | {developerInfo} | {followers} | {personalProjects} | {contributedProjects} |");
             }
             
+            return sb.ToString();
+        }
+
+        static string GenerateHtml(List<GitHubUser> users)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("<!DOCTYPE html>");
+            sb.AppendLine("<html lang=\"zh-Hant\">");
+            sb.AppendLine("<head>");
+            sb.AppendLine("    <meta charset=\"UTF-8\">");
+            sb.AppendLine("    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+            sb.AppendLine("    <title>台灣知名GitHub用戶排名</title>");
+            sb.AppendLine("    <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css\">");
+            sb.AppendLine("    <style>");
+            sb.AppendLine("        body { font-family: 'Segoe UI', 'Noto Sans TC', Arial, sans-serif; background: #f7f7f7; color: #222; }");
+            sb.AppendLine("        h1 { text-align: center; margin-top: 2rem; }");
+            sb.AppendLine("        table { border-collapse: collapse; margin: 2rem auto; background: #fff; box-shadow: 0 2px 8px #0001; }");
+            sb.AppendLine("        th, td { padding: 0.7rem 1rem; border: 1px solid #ddd; text-align: center; }");
+            sb.AppendLine("        th { background: #222; color: #fff; }");
+            sb.AppendLine("        tr:nth-child(even) { background: #f2f2f2; }");
+            sb.AppendLine("        .avatar { border-radius: 50%; width: 32px; height: 32px; vertical-align: middle; }");
+            sb.AppendLine("        .badge-btn { background: none; border: none; cursor: pointer; padding: 0; }");
+            sb.AppendLine("    </style>");
+            sb.AppendLine("</head>");
+            sb.AppendLine("<body>");
+            sb.AppendLine("<h1>台灣知名GitHub用戶排名</h1>");
+            sb.AppendLine($"<p style='text-align:center;'>更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}｜總計用戶數: {users.Count}</p>");
+            sb.AppendLine("<table>");
+            sb.AppendLine("<tr><th>Badge</th><th>排名</th><th>開發者</th><th>Followers</th><th>Personal Projects</th><th>Top Contributed Projects</th></tr>");
+            for (int i = 0; i < users.Count; i++)
+            {
+                var user = users[i];
+                var rank = i + 1;
+                var badgeUrl = $"https://img.shields.io/badge/K.O.%E6%A6%9C-NO{rank}%20%E6%88%B0%E5%8A%9B{user.Score:F0}_-red?style=for-the-badge&logo=github&logoColor=white&labelColor=black";
+                var badgeHtml = $"<button class='badge-btn' onclick=\"navigator.clipboard.writeText('{badgeUrl}')\"><img src='{badgeUrl}' alt='K.O.榜戰力指數' title='點擊複製 badge 連結' /></button>";
+                var developerInfo = $"<a href='{user.HtmlUrl}' target='_blank'><img class='avatar' src='{user.AvatarUrl}&s=32' alt='{user.Login}' /></a><br/><a href='{user.HtmlUrl}' target='_blank'><b>{user.Login}</b></a><br/>{user.Name}";
+                if (!string.IsNullOrEmpty(user.Location))
+                    developerInfo += $"<br/>📍 {user.Location}";
+                var followers = user.Followers.ToString("N0");
+                var personalProjects = "-";
+                if (user.TopRepositories.Any())
+                {
+                    var totalStars = user.TopRepositories.Sum(r => r.StargazersCount);
+                    var totalForks = user.TopRepositories.Sum(r => r.ForksCount);
+                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/>📦 {user.TopRepositories.Count} 個專案<br/>";
+                    var topRepos = user.TopRepositories.Take(3).ToList();
+                    for (int j = 0; j < topRepos.Count; j++)
+                    {
+                        var repo = topRepos[j];
+                        personalProjects += $"• <a href='{repo.HtmlUrl}' target='_blank'>{repo.Name}</a> ({repo.StargazersCount:N0}⭐)";
+                        if (j < topRepos.Count - 1) personalProjects += "<br/>";
+                    }
+                }
+                var contributedProjects = "-";
+                if (user.TopOrganizationRepositories.Any())
+                {
+                    var totalOrgStars = user.TopOrganizationRepositories.Sum(r => r.StargazersCount);
+                    var totalOrgForks = user.TopOrganizationRepositories.Sum(r => r.ForksCount);
+                    contributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>🏢 {user.TopOrganizationRepositories.Count} 個專案<br/>";
+                    var topOrgRepos = user.TopOrganizationRepositories.Take(3).ToList();
+                    for (int j = 0; j < topOrgRepos.Count; j++)
+                    {
+                        var repo = topOrgRepos[j];
+                        contributedProjects += $"• <a href='{repo.HtmlUrl}' target='_blank'>{repo.Name}</a> ({repo.StargazersCount:N0}⭐)";
+                        if (j < topOrgRepos.Count - 1) contributedProjects += "<br/>";
+                    }
+                }
+                sb.AppendLine($"<tr><td>{badgeHtml}</td><td>{rank}</td><td>{developerInfo}</td><td>{followers}</td><td>{personalProjects}</td><td>{contributedProjects}</td></tr>");
+            }
+            sb.AppendLine("</table>");
+            sb.AppendLine("<p style='text-align:center;color:#888;'>點擊 badge 可複製 badge 連結，可用於個人 README 或其他地方展示。</p>");
+            sb.AppendLine("</body></html>");
             return sb.ToString();
         }
     }
