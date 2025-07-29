@@ -77,6 +77,49 @@ namespace TaiwanPopularDevelopers
            $"followers:>{MinFollowers}+location:Matsu"
         };
 
+        static async Task<List<GitHubUser>> LoadExistingUsers()
+        {
+            try
+            {
+                if (File.Exists("Users.json"))
+                {
+                    var jsonContent = await File.ReadAllTextAsync("Users.json", Encoding.UTF8);
+                    var existingData = JsonConvert.DeserializeObject<dynamic>(jsonContent);
+                    if (existingData?.Users != null)
+                    {
+                        var users = JsonConvert.DeserializeObject<List<GitHubUser>>(existingData.Users.ToString());
+                        Console.WriteLine($"載入了 {users.Count} 個已完成的用戶資料");
+                        return users ?? new List<GitHubUser>();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"載入現有用戶資料時發生錯誤: {ex.Message}");
+            }
+            return new List<GitHubUser>();
+        }
+
+        static async Task SaveUserData(List<GitHubUser> users)
+        {
+            try
+            {
+                var jsonData = new
+                {
+                    GeneratedAt = DateTime.Now,
+                    TotalUsers = users.Count,
+                    Users = users.OrderByDescending(u => u.Score).ToList()
+                };
+                
+                var jsonString = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
+                await File.WriteAllTextAsync("Users.json", jsonString, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"儲存用戶資料時發生錯誤: {ex.Message}");
+            }
+        }
+
         static async Task Main(string[] args)
         {
             Console.WriteLine("台灣知名GitHub用戶排名系統");
@@ -132,6 +175,15 @@ namespace TaiwanPopularDevelopers
             var allUsers = new List<GitHubUser>();
             var processedUsers = new HashSet<string>();
 
+            // 載入已完成的用戶資料
+            Console.WriteLine("正在載入已完成的用戶資料...");
+            var existingUsers = await LoadExistingUsers();
+            foreach (var existingUser in existingUsers)
+            {
+                allUsers.Add(existingUser);
+                processedUsers.Add(existingUser.Login);
+            }
+
             // 搜尋每個地區的用戶
             foreach (var query in SearchQueries)
             {
@@ -160,15 +212,38 @@ namespace TaiwanPopularDevelopers
                 }
             }
 
-
-            Console.WriteLine($"找到 {allUsers.Count} 個台灣地區的GitHub用戶");
+            Console.WriteLine($"找到 {allUsers.Count} 個台灣地區的GitHub用戶 (其中 {existingUsers.Count} 個已完成)");
 
             // 計算每個用戶的分數並獲取詳細資訊
-            for (int i = 0; i < allUsers.Count; i++)
+            var newUsersToProcess = allUsers.Where(u => existingUsers.All(eu => eu.Login != u.Login)).ToList();
+            Console.WriteLine($"需要處理 {newUsersToProcess.Count} 個新用戶");
+
+            for (int i = 0; i < newUsersToProcess.Count; i++)
             {
-                var user = allUsers[i];
-                Console.WriteLine($"處理用戶 {i + 1}/{allUsers.Count}: {user.Login}");
-                await CalculateUserScore(user);
+                var user = newUsersToProcess[i];
+                Console.WriteLine($"處理新用戶 {i + 1}/{newUsersToProcess.Count}: {user.Login}");
+                
+                try
+                {
+                    await CalculateUserScore(user);
+                    
+                    // 更新已完成用戶的資料
+                    var existingUserIndex = allUsers.FindIndex(u => u.Login == user.Login);
+                    if (existingUserIndex >= 0)
+                    {
+                        allUsers[existingUserIndex] = user;
+                    }
+                    
+                    // 每完成一個用戶就儲存
+                    await SaveUserData(allUsers);
+                    Console.WriteLine($"已儲存用戶 {user.Login} 的資料");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"處理用戶 {user.Login} 時發生錯誤: {ex.Message}");
+                    // 即使某個用戶處理失敗，也要儲存其他已完成的用戶
+                    await SaveUserData(allUsers);
+                }
                 
                 // 避免API限制
                 await Task.Delay(500);
@@ -177,17 +252,9 @@ namespace TaiwanPopularDevelopers
             // 按分數排序
             var rankedUsers = allUsers.OrderByDescending(u => u.Score).ToList();
 
-            // 儲存到JSON檔案
-            var jsonData = new
-            {
-                GeneratedAt = DateTime.Now,
-                TotalUsers = rankedUsers.Count,
-                Users = rankedUsers
-            };
-            
-            var jsonString = JsonConvert.SerializeObject(jsonData, Formatting.Indented);
-            await File.WriteAllTextAsync("Users.json", jsonString, Encoding.UTF8);
-            Console.WriteLine("用戶資料已儲存到 Users.json");
+            // 最終儲存到JSON檔案
+            await SaveUserData(rankedUsers);
+            Console.WriteLine("所有用戶資料已最終儲存到 Users.json");
 
             // 生成Markdown
             var markdown = GenerateMarkdown(rankedUsers);
