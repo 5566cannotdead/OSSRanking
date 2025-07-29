@@ -215,13 +215,22 @@ namespace TaiwanPopularDevelopers
             Console.WriteLine($"找到 {allUsers.Count} 個台灣地區的GitHub用戶 (其中 {existingUsers.Count} 個已完成)");
 
             // 計算每個用戶的分數並獲取詳細資訊
-            var newUsersToProcess = allUsers.Where(u => existingUsers.All(eu => eu.Login != u.Login)).ToList();
-            Console.WriteLine($"需要處理 {newUsersToProcess.Count} 個新用戶");
+            // 找出需要處理的用戶：新用戶 + CreatedAt 為默認值的用戶
+            var newUsersToProcess = allUsers.Where(u => 
+                existingUsers.All(eu => eu.Login != u.Login) || // 新用戶
+                (existingUsers.Any(eu => eu.Login == u.Login) && 
+                 existingUsers.First(eu => eu.Login == u.Login).CreatedAt == DateTime.MinValue) // CreatedAt 為默認值的用戶
+            ).ToList();
+            
+            Console.WriteLine($"需要處理 {newUsersToProcess.Count} 個用戶 (包括新用戶和需要更新的用戶)");
 
             for (int i = 0; i < newUsersToProcess.Count; i++)
             {
                 var user = newUsersToProcess[i];
-                Console.WriteLine($"處理新用戶 {i + 1}/{newUsersToProcess.Count}: {user.Login}");
+                var isNewUser = existingUsers.All(eu => eu.Login != user.Login);
+                var userType = isNewUser ? "新用戶" : "需要更新的用戶";
+                
+                Console.WriteLine($"處理{userType} {i + 1}/{newUsersToProcess.Count}: {user.Login}");
                 
                 try
                 {
@@ -573,13 +582,14 @@ namespace TaiwanPopularDevelopers
                     else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
                         // API限制，等待5分鐘後重試
+                        Console.WriteLine(content);
                         var resetTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault() ?? "0")).DateTime;
                         var waitTime = resetTime - DateTime.UtcNow;
                         
                         if (waitTime.TotalSeconds > 0)
                         {
                             Console.WriteLine($"GitHub API限制，等待 {waitTime.TotalMinutes:F1} 分鐘後重試...");
-                            await Task.Delay((int)waitTime.TotalMilliseconds + 1000);
+                            await Task.Delay((int)waitTime.TotalMilliseconds + 10000);
                         }
                         else
                         {
