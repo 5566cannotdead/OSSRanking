@@ -530,6 +530,21 @@ namespace TaiwanPopularDevelopers
                                 });
                             }
                         }
+                        else
+                        {
+                            // 檢查是否是貢獻者列表過大的錯誤
+                            if (contributorsResponse.ErrorMessage.Contains("too large to list contributors") ||
+                                contributorsResponse.ErrorMessage.Contains("contributor list is too large"))
+                            {
+                                Console.WriteLine($"跳過 {repo.full_name}: 貢獻者列表過大，無法透過API獲取");
+                                continue;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"警告: 無法獲取 {repo.full_name} 的貢獻者資料: {contributorsResponse.ErrorMessage}");
+                                continue;
+                            }
+                        }
                         
                         await Task.Delay(50);
                     }
@@ -581,7 +596,18 @@ namespace TaiwanPopularDevelopers
                     }
                     else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
-                        // API限制，等待5分鐘後重試
+                        // 檢查是否是貢獻者列表過大的特殊錯誤
+                        if (content.Contains("too large to list contributors") || 
+                            content.Contains("contributor list is too large"))
+                        {
+                            return new GitHubApiResponse<T>
+                            {
+                                IsSuccess = false,
+                                ErrorMessage = content
+                            };
+                        }
+                        
+                        // API限制，等待後重試
                         Console.WriteLine(content);
                         var resetTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(response.Headers.GetValues("X-RateLimit-Reset").FirstOrDefault() ?? "0")).DateTime;
                         var waitTime = resetTime - DateTime.UtcNow;
