@@ -52,7 +52,7 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
-        private static readonly int MinFollowers = 2000; // 最低追蹤者數量門檻
+        private static readonly int MinFollowers = 6000; // 最低追蹤者數量門檻
 
         private static readonly string[] SearchQueries = {
             $"followers:>{MinFollowers}+location:Taiwan",
@@ -266,6 +266,9 @@ namespace TaiwanPopularDevelopers
                 user.Name = userDetail.Name;
                 user.Bio = userDetail.Bio;
                 user.CreatedAt = userDetail.CreatedAt;
+                user.Followers = userDetail.Followers;  // 更新 Followers
+                user.PublicRepos = userDetail.PublicRepos;  // 更新 PublicRepos
+                user.Location = userDetail.Location;  // 也更新 Location 以確保準確性
             }
 
             // 獲取用戶的所有倉庫（包括五顆星以下的）
@@ -419,7 +422,7 @@ namespace TaiwanPopularDevelopers
                 
                 if (orgReposResponse.IsSuccess)
                 {
-                    foreach (var repo in orgReposResponse.Data.Take(20)) // 每個組織最多20個倉庫
+                    foreach (var repo in orgReposResponse.Data.Take(10)) // 每個組織最多10個倉庫
                     {
                         // 檢查用戶是否為前五名貢獻者
                         var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors?per_page=5";
@@ -672,57 +675,79 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine($"**總計用戶數**: {users.Count}");
             sb.AppendLine();
 
+            // 生成表格標題
+            sb.AppendLine("| 排名 | Total Influence | 開發者 | Followers | Personal Projects | Top Contributed Projects |");
+            sb.AppendLine("|------|-----------------|--------|-----------|-------------------|--------------------------|");
+
             for (int i = 0; i < users.Count; i++)
             {
                 var user = users[i];
-                sb.AppendLine($"## {i + 1}. {user.Name} (@{user.Login})");
-                sb.AppendLine();
+                var rank = i + 1;
+                var totalInfluence = $"**{user.Score:F0}**";
                 
-                if (!string.IsNullOrEmpty(user.Bio))
+                // 開發者資訊 (頭像 + 姓名 + 位置)
+                var developerInfo = $"[<img src=\"{user.AvatarUrl}&s=32\" width=\"32\" height=\"32\" style=\"border-radius: 50%;\" />]({user.HtmlUrl})<br/>**[{user.Login}]({user.HtmlUrl})**<br/>{user.Name}";
+                if (!string.IsNullOrEmpty(user.Location))
                 {
-                    sb.AppendLine($"**簡介**: {user.Bio}");
-                    sb.AppendLine();
+                    developerInfo += $"<br/>📍 {user.Location}";
                 }
                 
-                sb.AppendLine($"**位置**: {user.Location}");
-                sb.AppendLine($"**追蹤者**: {user.Followers:N0}");
-                sb.AppendLine($"**公開倉庫**: {user.PublicRepos}");
-                sb.AppendLine($"**總分**: {user.Score:F0}");
-                sb.AppendLine($"**GitHub**: [{user.HtmlUrl}]({user.HtmlUrl})");
-                sb.AppendLine();
+                var followers = user.Followers.ToString("N0");
                 
+                // 個人專案資訊
+                var personalProjects = "";
                 if (user.TopRepositories.Any())
                 {
-                    sb.AppendLine("### 個人熱門專案");
-                    sb.AppendLine();
-                    sb.AppendLine("| 專案名稱 | 描述 | Star | Fork | 語言 |");
-                    sb.AppendLine("|---------|------|------|------|------|");
+                    var totalStars = user.TopRepositories.Sum(r => r.StargazersCount);
+                    var totalForks = user.TopRepositories.Sum(r => r.ForksCount);
+                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/>📦 {user.TopRepositories.Count} 個專案<br/>";
                     
-                    foreach (var repo in user.TopRepositories.Take(5))
+                    var topRepos = user.TopRepositories.Take(3).ToList();
+                    for (int j = 0; j < topRepos.Count; j++)
                     {
-                        var description = string.IsNullOrEmpty(repo.Description) ? "-" : repo.Description.Replace("|", "\\|");
-                        sb.AppendLine($"| [{repo.Name}]({repo.HtmlUrl}) | {description} | {repo.StargazersCount:N0} | {repo.ForksCount:N0} | {repo.Language ?? "-"} |");
+                        var repo = topRepos[j];
+                        personalProjects += $"• [{repo.Name}]({repo.HtmlUrl}) ({repo.StargazersCount:N0}⭐)";
+                        if (j < topRepos.Count - 1)
+                        {
+                            personalProjects += "<br/>";
+                        }
                     }
-                    sb.AppendLine();
+                }
+                else
+                {
+                    personalProjects = "-";
                 }
                 
+                // 組織貢獻專案資訊
+                var contributedProjects = "";
                 if (user.TopOrganizationRepositories.Any())
                 {
-                    sb.AppendLine("### 組織貢獻專案");
-                    sb.AppendLine();
-                    sb.AppendLine("| 專案名稱 | 組織 | 描述 | Star | Fork | 語言 |");
-                    sb.AppendLine("|---------|------|------|------|------|------|");
+                    var totalOrgStars = user.TopOrganizationRepositories.Sum(r => r.StargazersCount);
+                    var totalOrgForks = user.TopOrganizationRepositories.Sum(r => r.ForksCount);
+                    contributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>🏢 {user.TopOrganizationRepositories.Count} 個專案<br/>";
                     
-                    foreach (var repo in user.TopOrganizationRepositories.Take(5))
+                    var topOrgRepos = user.TopOrganizationRepositories.Take(3).ToList();
+                    for (int j = 0; j < topOrgRepos.Count; j++)
                     {
-                        var description = string.IsNullOrEmpty(repo.Description) ? "-" : repo.Description.Replace("|", "\\|");
-                        sb.AppendLine($"| [{repo.Name}]({repo.HtmlUrl}) | {repo.OwnerLogin} | {description} | {repo.StargazersCount:N0} | {repo.ForksCount:N0} | {repo.Language ?? "-"} |");
+                        var repo = topOrgRepos[j];
+                        contributedProjects += $"• [{repo.Name}]({repo.HtmlUrl}) ({repo.StargazersCount:N0}⭐)";
+                        if (j < topOrgRepos.Count - 1)
+                        {
+                            contributedProjects += "<br/>";
+                        }
                     }
-                    sb.AppendLine();
+                }
+                else
+                {
+                    contributedProjects = "-";
                 }
                 
-                sb.AppendLine("---");
-                sb.AppendLine();
+                // 轉義管道符號以避免表格格式錯誤
+                developerInfo = developerInfo.Replace("|", "\\|");
+                personalProjects = personalProjects.Replace("|", "\\|");
+                contributedProjects = contributedProjects.Replace("|", "\\|");
+                
+                sb.AppendLine($"| {rank} | {totalInfluence} | {developerInfo} | {followers} | {personalProjects} | {contributedProjects} |");
             }
             
             return sb.ToString();
