@@ -1,10 +1,15 @@
 ﻿# 台灣知名GitHub用戶排名
 
+## [好讀HTML版本](https://5566cannotdead.github.io/taiwan_popular_developers)
+
+
 > 本排名基於以下指標計算：
-> - 個人追蹤數量
-> - 個人專案Star數量
-> - 個人專案Fork數量
-> - 組織貢獻專案的Star和Fork數量
+>
+> 個人追蹤數量 + 個人專案Star數量 + 個人專案Fork數量 + 組織貢獻專案的Star + 組織貢獻專案的Fork
+>
+> - 追蹤數 > 100
+> - 組織專案前五名
+> - 因為欄位有限，顯示只取前幾名專案，完整專案資料可以看 [資料集](https://github.com/5566cannotdead/taiwan_popular_developers/blob/main/Users.json)
 
 **更新時間**: 2025-07-30 08:37:25
 **總計用戶數**: 641
