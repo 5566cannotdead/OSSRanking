@@ -10,6 +10,7 @@
 >
 > - 追蹤數 > 100
 > - 組織專案前五名
+> - 因為欄位有限，顯示只取前五個專案(計算會包含所有)，完整專案資料可以看 [數據集](https://github.com/5566cannotdead/taiwan_popular_developers/blob/main/Users.json)
 
 **更新時間**: 2025-07-29 20:11:15
 **總計用戶數**: 639
