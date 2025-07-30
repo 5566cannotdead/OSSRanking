@@ -773,10 +773,12 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine("# 台灣知名GitHub用戶排名");
             sb.AppendLine();
             sb.AppendLine("> 本排名基於以下指標計算：");
-            sb.AppendLine("> - 個人追蹤數量");
-            sb.AppendLine("> - 個人專案Star數量");
-            sb.AppendLine("> - 個人專案Fork數量");
-            sb.AppendLine("> - 組織貢獻專案的Star和Fork數量");
+            sb.AppendLine(">");
+            sb.AppendLine("> 個人追蹤數量 + 個人專案Star數量 + 個人專案Fork數量 + 組織貢獻專案的Star + 組織貢獻專案的Fork");
+            sb.AppendLine(">");
+            sb.AppendLine("> - 追蹤數 > 100");
+            sb.AppendLine("> - 組織專案前五名");
+            sb.AppendLine("> - 因為欄位有限，顯示只取前幾名專案，完整專案資料可以看 [資料集](https://github.com/5566cannotdead/taiwan_popular_developers/blob/main/Users.json)");
             sb.AppendLine();
             sb.AppendLine($"**更新時間**: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"**總計用戶數**: {users.Count}");
@@ -807,7 +809,7 @@ namespace TaiwanPopularDevelopers
                 {
                     var totalStars = user.TopRepositories.Sum(r => r.StargazersCount);
                     var totalForks = user.TopRepositories.Sum(r => r.ForksCount);
-                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/>📦 {user.TopRepositories.Count} 個專案<br/>";
+                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/><br/>";
                     
                     var topRepos = user.TopRepositories.Take(3).ToList();
                     for (int j = 0; j < topRepos.Count; j++)
