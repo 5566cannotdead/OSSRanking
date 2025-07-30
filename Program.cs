@@ -901,7 +901,7 @@ namespace TaiwanPopularDevelopers
                 {
                     var totalStars = user.TopRepositories.Sum(r => r.StargazersCount);
                     var totalForks = user.TopRepositories.Sum(r => r.ForksCount);
-                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/>📦 {user.TopRepositories.Count} 個專案<br/>";
+                    personalProjects = $"⭐ {totalStars:N0} 🍴 {totalForks:N0}<br/>";
                     var topRepos = user.TopRepositories.Take(3).ToList();
                     for (int j = 0; j < topRepos.Count; j++)
                     {
@@ -915,7 +915,7 @@ namespace TaiwanPopularDevelopers
                 {
                     var totalOrgStars = user.TopOrganizationRepositories.Sum(r => r.StargazersCount);
                     var totalOrgForks = user.TopOrganizationRepositories.Sum(r => r.ForksCount);
-                    contributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>🏢 {user.TopOrganizationRepositories.Count} 個專案<br/>";
+                    contributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>";
                     var topOrgRepos = user.TopOrganizationRepositories.Take(3).ToList();
                     for (int j = 0; j < topOrgRepos.Count; j++)
                     {
