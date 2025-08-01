@@ -53,7 +53,7 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
-        private static readonly int MinFollowers = 500; // 最低追蹤者數量門檻
+        private static readonly int MinFollowers = 700; // 最低追蹤者數量門檻
 
         private static readonly string[] SearchQueries = {
             $"followers:>{MinFollowers}+location:Taiwan",
@@ -469,6 +469,56 @@ namespace TaiwanPopularDevelopers
             };
         }
 
+        static async Task<bool> IsUserTopContributor(string username, string repoFullName, int topCount = 10)
+        {
+            try
+            {
+                var contributorsUrl = $"https://api.github.com/repos/{repoFullName}/contributors?per_page={topCount}";
+                var contributorsResponse = await MakeGitHubApiCall<List<dynamic>>(contributorsUrl);
+                
+                if (contributorsResponse.IsSuccess && contributorsResponse.Data != null)
+                {
+                    return contributorsResponse.Data.Any(c => c.login?.ToString() == username);
+                }
+                else if (contributorsResponse.ErrorMessage.Contains("too large to list contributors") ||
+                        contributorsResponse.ErrorMessage.Contains("contributor list is too large"))
+                {
+                    // 對於貢獻者列表過大的專案，我們保守地返回 false
+                    Console.WriteLine($"無法檢查 {repoFullName} 的貢獻者列表：列表過大");
+                    return false;
+                }
+                else
+                {
+                    Console.WriteLine($"警告: 無法獲取 {repoFullName} 的貢獻者資料: {contributorsResponse.ErrorMessage}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"檢查用戶 {username} 在 {repoFullName} 的貢獻者排名時發生異常: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 安全地从动态对象中获取布尔值
+        /// </summary>
+        /// <param name="value">动态对象的值</param>
+        /// <param name="defaultValue">默认值</param>
+        /// <returns>转换后的布尔值</returns>
+        static bool SafeGetBool(dynamic value, bool defaultValue = false)
+        {
+            if (value == null) return defaultValue;
+            
+            if (value is bool boolValue)
+                return boolValue;
+                
+            if (bool.TryParse(value.ToString(), out bool parsedValue))
+                return parsedValue;
+                
+            return defaultValue;
+        }
+
         static async Task<List<Repository>> GetAllUserRepositories(string username)
         {
             var repositories = new List<Repository>();
@@ -489,22 +539,66 @@ namespace TaiwanPopularDevelopers
                 {
                     var starCount = repo.stargazers_count ?? 0;
                     var forkCount = repo.forks_count ?? 0;
+                    var isFork = SafeGetBool(repo.fork);
+                    var ownerLogin = repo.owner?.login?.ToString() ?? "";
                     
-                    // 只保存兩顆星以上的專案
-                    if (starCount >= 2)
+                    // 如果是 Fork 專案，檢查原始專案的貢獻者排名
+                    if (isFork && repo.parent != null)
                     {
-                        repositories.Add(new Repository
+                        var parentFullName = repo.parent.full_name?.ToString();
+                        var parentOwnerType = repo.parent.owner?.type?.ToString() ?? "";
+                        var parentOwnerLogin = repo.parent.owner?.login?.ToString() ?? "";
+                        
+                        if (!string.IsNullOrEmpty(parentFullName))
                         {
-                            Name = repo.name,
-                            FullName = repo.full_name,
-                            StargazersCount = starCount,
-                            ForksCount = forkCount,
-                            HtmlUrl = repo.html_url ?? "",
-                            Language = repo.language ?? "",
-                            IsFork = repo.fork ?? false,
-                            OwnerLogin = repo.owner?.login ?? "",
-                            IsOrganization = false
-                        });
+                            // 檢查用戶是否為原始專案的前10名貢獻者
+                            var isTopContributor = await IsUserTopContributor(username, parentFullName, 10);
+                            
+                            if (isTopContributor)
+                            {
+                                var parentStarCount = repo.parent.stargazers_count ?? 0;
+                                var parentForkCount = repo.parent.forks_count ?? 0;
+                                
+                                // 只保存兩顆星以上的原始專案
+                                if (parentStarCount >= 2)
+                                {
+                                    repositories.Add(new Repository
+                                    {
+                                        Name = repo.parent.name?.ToString() ?? "",
+                                        FullName = parentFullName ?? "",
+                                        StargazersCount = parentStarCount,
+                                        ForksCount = parentForkCount,
+                                        HtmlUrl = repo.parent.html_url?.ToString() ?? "",
+                                        Language = repo.parent.language?.ToString() ?? "",
+                                        IsFork = false, // 原始專案本身不是 Fork
+                                        OwnerLogin = parentOwnerLogin,
+                                        IsOrganization = parentOwnerType == "Organization"
+                                    });
+                                    
+                                    Console.WriteLine($"發現 {username} 是 {parentFullName} 的前10名貢獻者 (通過 Fork 專案 {repo.full_name} 發現)");
+                                }
+                            }
+                        }
+                    }
+                    else if (!isFork)
+                    {
+                        // 處理非 Fork 的個人專案
+                        // 只保存兩顆星以上的專案
+                        if (starCount >= 2)
+                        {
+                            repositories.Add(new Repository
+                            {
+                                Name = repo.name,
+                                FullName = repo.full_name,
+                                StargazersCount = starCount,
+                                ForksCount = forkCount,
+                                HtmlUrl = repo.html_url ?? "",
+                                Language = repo.language ?? "",
+                                IsFork = false,
+                                OwnerLogin = ownerLogin,
+                                IsOrganization = false
+                            });
+                        }
                     }
                 }
 
@@ -535,20 +629,21 @@ namespace TaiwanPopularDevelopers
                 {
                     var starCount = repo.stargazers_count ?? 0;
                     var forkCount = repo.forks_count ?? 0;
+                    var isFork = SafeGetBool(repo.fork);
                     
                     // 只保存兩顆星以上的專案
                     if (starCount >= 2)
                     {
                         repositories.Add(new Repository
                         {
-                            Name = repo.name,
-                            FullName = repo.full_name,
+                            Name = repo.name?.ToString() ?? "",
+                            FullName = repo.full_name?.ToString() ?? "",
                             StargazersCount = starCount,
                             ForksCount = forkCount,
-                            HtmlUrl = repo.html_url ?? "",
-                            Language = repo.language ?? "",
-                            IsFork = repo.fork ?? false,
-                            OwnerLogin = repo.owner?.login ?? "",
+                            HtmlUrl = repo.html_url?.ToString() ?? "",
+                            Language = repo.language?.ToString() ?? "",
+                            IsFork = isFork,
+                            OwnerLogin = repo.owner?.login?.ToString() ?? "",
                             IsOrganization = false
                         });
                     }
@@ -601,19 +696,20 @@ namespace TaiwanPopularDevelopers
                             {
                                 var starCount = repo.stargazers_count ?? 0;
                                 var forkCount = repo.forks_count ?? 0;
+                                var isFork = SafeGetBool(repo.fork);
                                 
                                 // 只保存兩顆星以上的專案
                                 if (starCount >= 2)
                                 {
                                     repositories.Add(new Repository
                                     {
-                                        Name = repo.name,
-                                        FullName = repo.full_name,
+                                        Name = repo.name?.ToString() ?? "",
+                                        FullName = repo.full_name?.ToString() ?? "",
                                         StargazersCount = starCount,
                                         ForksCount = forkCount,
-                                        HtmlUrl = repo.html_url ?? "",
-                                        Language = repo.language ?? "",
-                                        IsFork = repo.fork ?? false,
+                                        HtmlUrl = repo.html_url?.ToString() ?? "",
+                                        Language = repo.language?.ToString() ?? "",
+                                        IsFork = isFork,
                                         OwnerLogin = orgLogin,
                                         IsOrganization = true
                                     });
@@ -691,15 +787,17 @@ namespace TaiwanPopularDevelopers
                                 // 只保存兩顆星以上的專案
                                 if (starCount >= 2)
                                 {
+                                    var isFork = SafeGetBool(repo.fork);
+                                    
                                     repositories.Add(new Repository
                                     {
-                                        Name = repo.name,
-                                        FullName = repo.full_name,
+                                        Name = repo.name?.ToString() ?? "",
+                                        FullName = repo.full_name?.ToString() ?? "",
                                         StargazersCount = starCount,
                                         ForksCount = forkCount,
-                                        HtmlUrl = repo.html_url ?? "",
-                                        Language = repo.language ?? "",
-                                        IsFork = repo.fork ?? false,
+                                        HtmlUrl = repo.html_url?.ToString() ?? "",
+                                        Language = repo.language?.ToString() ?? "",
+                                        IsFork = isFork,
                                         OwnerLogin = ownerLogin,
                                         IsOrganization = false
                                     });
@@ -716,15 +814,17 @@ namespace TaiwanPopularDevelopers
                             // 只保存兩顆星以上的專案
                             if (starCount >= 2)
                             {
+                                var isFork = SafeGetBool(repo.fork);
+                                
                                 repositories.Add(new Repository
                                 {
-                                    Name = repo.name,
-                                    FullName = repo.full_name,
+                                    Name = repo.name?.ToString() ?? "",
+                                    FullName = repo.full_name?.ToString() ?? "",
                                     StargazersCount = starCount,
                                     ForksCount = forkCount,
-                                    HtmlUrl = repo.html_url ?? "",
-                                    Language = repo.language ?? "",
-                                    IsFork = repo.fork ?? false,
+                                    HtmlUrl = repo.html_url?.ToString() ?? "",
+                                    Language = repo.language?.ToString() ?? "",
+                                    IsFork = isFork,
                                     OwnerLogin = ownerLogin,
                                     IsOrganization = false
                                 });
