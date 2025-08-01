@@ -1,5 +1,5 @@
 ﻿# 台灣知名GitHub用戶排名
-## [好讀HTML版本](https://5566cannotdead.github.io/OSSRanking/index.html)
+## [好讀HTML版本](https://5566cannotdead.github.io/OSSRanking/Taiwan)
 
 > 本排名基於以下指標計算：
 >

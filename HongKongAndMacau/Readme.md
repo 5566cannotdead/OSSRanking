@@ -1,7 +1,7 @@
 ﻿# 香港澳門知名GitHub用戶排名
 
-## [好讀HTML版本](https://5566cannotdead.github.io/OSSRanking/HongKongAndMacau/index.html/)
-
+## [好讀HTML版本](https://5566cannotdead.github.io/OSSRanking/HongKongAndMacau)
+ 
 > 本排名基於以下指標計算：
 >
 > 個人追蹤數量 + 個人專案Star數量 + 個人專案Fork數量 + 組織貢獻專案的Star + 組織貢獻專案的Fork
