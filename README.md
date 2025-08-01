@@ -11,3 +11,7 @@
 ## 🏆 [台灣排行](Taiwan/README.md)
 
 ## 🏆 [港澳排行](HongKongAndMacau/Readme.md)
+
+## 授權
+
+本專案採用[MIT授權條款](/LICENSE)。
