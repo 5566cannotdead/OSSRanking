@@ -31,7 +31,6 @@ namespace TaiwanPopularDevelopers
     {
         public string Name { get; set; } = "";
         public string FullName { get; set; } = "";
-        public string Description { get; set; } = "";
         public int StargazersCount { get; set; }
         public int ForksCount { get; set; }
         public string HtmlUrl { get; set; } = "";
@@ -54,7 +53,7 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
-        private static readonly int MinFollowers = 700; // 最低追蹤者數量門檻
+        private static readonly int MinFollowers = 500; // 最低追蹤者數量門檻
 
         private static readonly string[] SearchQueries = {
             $"followers:>{MinFollowers}+location:Taiwan",
@@ -488,19 +487,25 @@ namespace TaiwanPopularDevelopers
 
                 foreach (var repo in response.Data)
                 {
-                    repositories.Add(new Repository
+                    var starCount = repo.stargazers_count ?? 0;
+                    var forkCount = repo.forks_count ?? 0;
+                    
+                    // 只保存兩顆星以上的專案
+                    if (starCount >= 2)
                     {
-                        Name = repo.name,
-                        FullName = repo.full_name,
-                        Description = repo.description ?? "",
-                        StargazersCount = repo.stargazers_count ?? 0,
-                        ForksCount = repo.forks_count ?? 0,
-                        HtmlUrl = repo.html_url ?? "",
-                        Language = repo.language ?? "",
-                        IsFork = repo.fork ?? false,
-                        OwnerLogin = repo.owner?.login ?? "",
-                        IsOrganization = false
-                    });
+                        repositories.Add(new Repository
+                        {
+                            Name = repo.name,
+                            FullName = repo.full_name,
+                            StargazersCount = starCount,
+                            ForksCount = forkCount,
+                            HtmlUrl = repo.html_url ?? "",
+                            Language = repo.language ?? "",
+                            IsFork = repo.fork ?? false,
+                            OwnerLogin = repo.owner?.login ?? "",
+                            IsOrganization = false
+                        });
+                    }
                 }
 
                 page++;
@@ -528,19 +533,25 @@ namespace TaiwanPopularDevelopers
 
                 foreach (var repo in response.Data)
                 {
-                    repositories.Add(new Repository
+                    var starCount = repo.stargazers_count ?? 0;
+                    var forkCount = repo.forks_count ?? 0;
+                    
+                    // 只保存兩顆星以上的專案
+                    if (starCount >= 2)
                     {
-                        Name = repo.name,
-                        FullName = repo.full_name,
-                        Description = repo.description ?? "",
-                        StargazersCount = repo.stargazers_count ?? 0,
-                        ForksCount = repo.forks_count ?? 0,
-                        HtmlUrl = repo.html_url ?? "",
-                        Language = repo.language ?? "",
-                        IsFork = repo.fork ?? false,
-                        OwnerLogin = repo.owner?.login ?? "",
-                        IsOrganization = false
-                    });
+                        repositories.Add(new Repository
+                        {
+                            Name = repo.name,
+                            FullName = repo.full_name,
+                            StargazersCount = starCount,
+                            ForksCount = forkCount,
+                            HtmlUrl = repo.html_url ?? "",
+                            Language = repo.language ?? "",
+                            IsFork = repo.fork ?? false,
+                            OwnerLogin = repo.owner?.login ?? "",
+                            IsOrganization = false
+                        });
+                    }
                 }
 
                 page++;
@@ -588,19 +599,25 @@ namespace TaiwanPopularDevelopers
                             var isTopFiveContributor = contributorsResponse.Data.Any(c => c.login == username);
                             if (isTopFiveContributor)
                             {
-                                repositories.Add(new Repository
+                                var starCount = repo.stargazers_count ?? 0;
+                                var forkCount = repo.forks_count ?? 0;
+                                
+                                // 只保存兩顆星以上的專案
+                                if (starCount >= 2)
                                 {
-                                    Name = repo.name,
-                                    FullName = repo.full_name,
-                                    Description = repo.description ?? "",
-                                    StargazersCount = repo.stargazers_count ?? 0,
-                                    ForksCount = repo.forks_count ?? 0,
-                                    HtmlUrl = repo.html_url ?? "",
-                                    Language = repo.language ?? "",
-                                    IsFork = repo.fork ?? false,
-                                    OwnerLogin = orgLogin,
-                                    IsOrganization = true
-                                });
+                                    repositories.Add(new Repository
+                                    {
+                                        Name = repo.name,
+                                        FullName = repo.full_name,
+                                        StargazersCount = starCount,
+                                        ForksCount = forkCount,
+                                        HtmlUrl = repo.html_url ?? "",
+                                        Language = repo.language ?? "",
+                                        IsFork = repo.fork ?? false,
+                                        OwnerLogin = orgLogin,
+                                        IsOrganization = true
+                                    });
+                                }
                             }
                         }
                         else
@@ -668,13 +685,43 @@ namespace TaiwanPopularDevelopers
                             var isContributor = contributorsResponse.Data.Any(c => c.login == username);
                             if (isContributor)
                             {
+                                var starCount = repo.stargazers_count ?? 0;
+                                var forkCount = repo.forks_count ?? 0;
+                                
+                                // 只保存兩顆星以上的專案
+                                if (starCount >= 2)
+                                {
+                                    repositories.Add(new Repository
+                                    {
+                                        Name = repo.name,
+                                        FullName = repo.full_name,
+                                        StargazersCount = starCount,
+                                        ForksCount = forkCount,
+                                        HtmlUrl = repo.html_url ?? "",
+                                        Language = repo.language ?? "",
+                                        IsFork = repo.fork ?? false,
+                                        OwnerLogin = ownerLogin,
+                                        IsOrganization = false
+                                    });
+                                }
+                            }
+                        }
+                        else if (contributorsResponse.ErrorMessage.Contains("too large to list contributors") ||
+                                contributorsResponse.ErrorMessage.Contains("contributor list is too large"))
+                        {
+                            var starCount = repo.stargazers_count ?? 0;
+                            var forkCount = repo.forks_count ?? 0;
+                            
+                            // 對於貢獻者列表過大的專案，我們假設搜尋API的結果是準確的
+                            // 只保存兩顆星以上的專案
+                            if (starCount >= 2)
+                            {
                                 repositories.Add(new Repository
                                 {
                                     Name = repo.name,
                                     FullName = repo.full_name,
-                                    Description = repo.description ?? "",
-                                    StargazersCount = repo.stargazers_count ?? 0,
-                                    ForksCount = repo.forks_count ?? 0,
+                                    StargazersCount = starCount,
+                                    ForksCount = forkCount,
                                     HtmlUrl = repo.html_url ?? "",
                                     Language = repo.language ?? "",
                                     IsFork = repo.fork ?? false,
@@ -682,24 +729,6 @@ namespace TaiwanPopularDevelopers
                                     IsOrganization = false
                                 });
                             }
-                        }
-                        else if (contributorsResponse.ErrorMessage.Contains("too large to list contributors") ||
-                                contributorsResponse.ErrorMessage.Contains("contributor list is too large"))
-                        {
-                            // 對於貢獻者列表過大的專案，我們假設搜尋API的結果是準確的
-                            repositories.Add(new Repository
-                            {
-                                Name = repo.name,
-                                FullName = repo.full_name,
-                                Description = repo.description ?? "",
-                                StargazersCount = repo.stargazers_count ?? 0,
-                                ForksCount = repo.forks_count ?? 0,
-                                HtmlUrl = repo.html_url ?? "",
-                                Language = repo.language ?? "",
-                                IsFork = repo.fork ?? false,
-                                OwnerLogin = ownerLogin,
-                                IsOrganization = false
-                            });
                         }
                         
                         await Task.Delay(50); // 避免API限制
