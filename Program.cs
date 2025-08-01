@@ -23,6 +23,7 @@ namespace TaiwanPopularDevelopers
         public string Type { get; set; } = "";  // "User" 或 "Organization"
         public List<Repository> TopRepositories { get; set; } = new List<Repository>();
         public List<Repository> TopOrganizationRepositories { get; set; } = new List<Repository>();
+        public List<Repository> TopContributedRepositories { get; set; } = new List<Repository>();
         public List<Repository> AllRepositories { get; set; } = new List<Repository>();
     }
 
@@ -53,7 +54,7 @@ namespace TaiwanPopularDevelopers
     {
         private static readonly HttpClient httpClient = new HttpClient();
         private static string? githubToken;
-        private static readonly int MinFollowers = 100; // 最低追蹤者數量門檻
+        private static readonly int MinFollowers = 700; // 最低追蹤者數量門檻
 
         private static readonly string[] SearchQueries = {
             $"followers:>{MinFollowers}+location:Taiwan",
@@ -399,18 +400,33 @@ namespace TaiwanPopularDevelopers
                 }
             }
 
-            // 獲取用戶的所有倉庫（包括五顆星以下的）
-            var allRepositories = await GetAllUserRepositories(user.Login);
-            user.AllRepositories = allRepositories;
-
-            // 獲取用戶的頂級倉庫（前五名）
-            var topRepos = allRepositories.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
-            user.TopRepositories = topRepos;
-
+            // 獲取用戶的所有個人倉庫
+            var personalRepos = await GetAllUserRepositories(user.Login);
+            
             // 獲取用戶參與的組織倉庫
             var orgRepos = await GetUserOrganizationRepositories(user.Login);
+            
+            // 獲取用戶貢獻的其他個人專案（非自己的且非組織的）
+            var contributedRepos = await GetUserContributedRepositories(user.Login);
+            
+            // 合併所有類型的專案到 AllRepositories
+            var allRepositories = new List<Repository>();
+            allRepositories.AddRange(personalRepos);
+            allRepositories.AddRange(orgRepos);
+            allRepositories.AddRange(contributedRepos);
+            user.AllRepositories = allRepositories;
+
+            // 獲取用戶的頂級個人倉庫（前五名）
+            var topRepos = personalRepos.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
+            user.TopRepositories = topRepos;
+
+            // 獲取頂級組織貢獻專案（前五名）
             var topOrgRepos = orgRepos.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
             user.TopOrganizationRepositories = topOrgRepos;
+
+            // 獲取頂級其他個人專案貢獻（前五名）
+            var topContributedRepos = contributedRepos.OrderByDescending(r => r.StargazersCount + r.ForksCount).Take(5).ToList();
+            user.TopContributedRepositories = topContributedRepos;
 
             // 計算分數
             double score = 0;
@@ -423,6 +439,9 @@ namespace TaiwanPopularDevelopers
             
             // 組織貢獻個人能排在前五名的專案 star + fork
             score += user.TopOrganizationRepositories.Sum(r => r.StargazersCount * 1.0 + r.ForksCount * 1.0);
+            
+            // 其他個人專案貢獻的 star + fork
+            score += user.TopContributedRepositories.Sum(r => r.StargazersCount * 1.0 + r.ForksCount * 1.0);
 
             user.Score = score;
             return true; // 返回 true 表示用戶應該被保留
@@ -554,8 +573,8 @@ namespace TaiwanPopularDevelopers
                 {
                     foreach (var repo in orgReposResponse.Data.Take(10)) // 每個組織最多10個倉庫
                     {
-                        // 檢查用戶是否為前五名貢獻者
-                        var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors?per_page=5";
+                        // 檢查用戶是否為前10名貢獻者
+                        var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors?per_page=10";
                         var contributorsResponse = await MakeGitHubApiCall<List<dynamic>>(contributorsUrl);
                         
                         if (contributorsResponse.IsSuccess)
@@ -605,6 +624,95 @@ namespace TaiwanPopularDevelopers
                 }
                 
                 await Task.Delay(100);
+            }
+
+            return repositories;
+        }
+
+        static async Task<List<Repository>> GetUserContributedRepositories(string username)
+        {
+            var repositories = new List<Repository>();
+            
+            try
+            {
+                // 使用 GitHub Search API 來尋找用戶貢獻的專案
+                // 搜尋該用戶作為貢獻者但不是擁有者的公開專案
+                var searchQuery = $"type:repository+is:public+committer:{username}+-user:{username}";
+                var searchUrl = $"https://api.github.com/search/repositories?q={searchQuery}&sort=stars&order=desc&per_page=50";
+                
+                var searchResponse = await MakeGitHubApiCall<dynamic>(searchUrl);
+                if (!searchResponse.IsSuccess)
+                {
+                    Console.WriteLine($"搜尋貢獻專案時發生錯誤: {searchResponse.ErrorMessage}");
+                    return repositories;
+                }
+
+                var items = searchResponse.Data?.items;
+                if (items == null)
+                    return repositories;
+
+                foreach (var repo in items)
+                {
+                    var ownerType = repo.owner?.type?.ToString() ?? "";
+                    var ownerLogin = repo.owner?.login?.ToString() ?? "";
+                    
+                    // 只取個人專案（非組織專案），且不是自己的專案
+                    if (ownerType == "User" && ownerLogin != username)
+                    {
+                        // 驗證用戶是否真的是這個專案的貢獻者
+                        var contributorsUrl = $"https://api.github.com/repos/{repo.full_name}/contributors?per_page=100";
+                        var contributorsResponse = await MakeGitHubApiCall<List<dynamic>>(contributorsUrl);
+                        
+                        if (contributorsResponse.IsSuccess && contributorsResponse.Data != null)
+                        {
+                            var isContributor = contributorsResponse.Data.Any(c => c.login == username);
+                            if (isContributor)
+                            {
+                                repositories.Add(new Repository
+                                {
+                                    Name = repo.name,
+                                    FullName = repo.full_name,
+                                    Description = repo.description ?? "",
+                                    StargazersCount = repo.stargazers_count ?? 0,
+                                    ForksCount = repo.forks_count ?? 0,
+                                    HtmlUrl = repo.html_url ?? "",
+                                    Language = repo.language ?? "",
+                                    IsFork = repo.fork ?? false,
+                                    OwnerLogin = ownerLogin,
+                                    IsOrganization = false
+                                });
+                            }
+                        }
+                        else if (contributorsResponse.ErrorMessage.Contains("too large to list contributors") ||
+                                contributorsResponse.ErrorMessage.Contains("contributor list is too large"))
+                        {
+                            // 對於貢獻者列表過大的專案，我們假設搜尋API的結果是準確的
+                            repositories.Add(new Repository
+                            {
+                                Name = repo.name,
+                                FullName = repo.full_name,
+                                Description = repo.description ?? "",
+                                StargazersCount = repo.stargazers_count ?? 0,
+                                ForksCount = repo.forks_count ?? 0,
+                                HtmlUrl = repo.html_url ?? "",
+                                Language = repo.language ?? "",
+                                IsFork = repo.fork ?? false,
+                                OwnerLogin = ownerLogin,
+                                IsOrganization = false
+                            });
+                        }
+                        
+                        await Task.Delay(50); // 避免API限制
+                    }
+                    
+                    // 限制最多檢查前20個專案以避免API限制
+                    if (repositories.Count >= 20)
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"獲取用戶 {username} 的貢獻專案時發生異常: {ex.Message}");
             }
 
             return repositories;
@@ -826,10 +934,11 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine();
             sb.AppendLine("> 本排名基於以下指標計算：");
             sb.AppendLine(">");
-            sb.AppendLine("> 個人追蹤數量 + 個人專案Star數量 + 個人專案Fork數量 + 組織貢獻專案的Star + 組織貢獻專案的Fork");
+            sb.AppendLine("> 個人追蹤數量 + 個人專案Star數量 + 個人專案Fork數量 + 組織貢獻專案的Star + 組織貢獻專案的Fork + 其他個人專案貢獻的Star + 其他個人專案貢獻的Fork");
             sb.AppendLine(">");
             sb.AppendLine("> - 追蹤數 > 100");
             sb.AppendLine("> - 組織專案前五名");
+            sb.AppendLine("> - 其他個人專案貢獻前五名（排除自己的專案和組織專案）");
             sb.AppendLine("> - 因為欄位有限，顯示只取前幾名專案，完整專案資料可以看 [資料集](https://github.com/5566cannotdead/taiwan_popular_developers/blob/main/Users.json)");
             sb.AppendLine();
             sb.AppendLine($"**更新時間**: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -837,8 +946,8 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine();
 
             // 生成表格標題
-            sb.AppendLine("| 排名 | Total Influence | 開發者 | Followers | Personal Projects | Top Contributed Projects |");
-            sb.AppendLine("|------|-----------------|--------|-----------|-------------------|--------------------------|");
+            sb.AppendLine("| 排名 | Total Influence | 開發者 | Followers | Personal Projects | Top Org Projects | Top Contributed Projects |");
+            sb.AppendLine("|------|-----------------|--------|-----------|-------------------|------------------|--------------------------|");
 
             for (int i = 0; i < users.Count; i++)
             {
@@ -880,35 +989,60 @@ namespace TaiwanPopularDevelopers
                 }
                 
                 // 組織貢獻專案資訊
-                var contributedProjects = "";
+                var orgContributedProjects = "";
                 if (user.TopOrganizationRepositories.Any())
                 {
                     var totalOrgStars = user.TopOrganizationRepositories.Sum(r => r.StargazersCount);
                     var totalOrgForks = user.TopOrganizationRepositories.Sum(r => r.ForksCount);
-                    contributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>🏢 {user.TopOrganizationRepositories.Count} 個專案<br/>";
+                    orgContributedProjects = $"⭐ {totalOrgStars:N0} 🍴 {totalOrgForks:N0}<br/>🏢 {user.TopOrganizationRepositories.Count} 個專案<br/>";
                     
                     var topOrgRepos = user.TopOrganizationRepositories.Take(3).ToList();
                     for (int j = 0; j < topOrgRepos.Count; j++)
                     {
                         var repo = topOrgRepos[j];
-                        contributedProjects += $"• [{repo.Name}]({repo.HtmlUrl}) ({repo.StargazersCount:N0}⭐)";
+                        orgContributedProjects += $"• [{repo.Name}]({repo.HtmlUrl}) ({repo.StargazersCount:N0}⭐)";
                         if (j < topOrgRepos.Count - 1)
                         {
-                            contributedProjects += "<br/>";
+                            orgContributedProjects += "<br/>";
                         }
                     }
                 }
                 else
                 {
-                    contributedProjects = "-";
+                    orgContributedProjects = "-";
+                }
+                
+                // 其他個人專案貢獻資訊
+                var otherContributedProjects = "";
+                if (user.TopContributedRepositories.Any())
+                {
+                    var totalContribStars = user.TopContributedRepositories.Sum(r => r.StargazersCount);
+                    var totalContribForks = user.TopContributedRepositories.Sum(r => r.ForksCount);
+                    otherContributedProjects = $"⭐ {totalContribStars:N0} 🍴 {totalContribForks:N0}<br/>👥 {user.TopContributedRepositories.Count} 個專案<br/>";
+                    
+                    var topContribRepos = user.TopContributedRepositories.Take(3).ToList();
+                    for (int j = 0; j < topContribRepos.Count; j++)
+                    {
+                        var repo = topContribRepos[j];
+                        otherContributedProjects += $"• [{repo.Name}]({repo.HtmlUrl}) ({repo.StargazersCount:N0}⭐)";
+                        if (j < topContribRepos.Count - 1)
+                        {
+                            otherContributedProjects += "<br/>";
+                        }
+                    }
+                }
+                else
+                {
+                    otherContributedProjects = "-";
                 }
                 
                 // 轉義管道符號以避免表格格式錯誤
                 developerInfo = developerInfo.Replace("|", "\\|");
                 personalProjects = personalProjects.Replace("|", "\\|");
-                contributedProjects = contributedProjects.Replace("|", "\\|");
+                orgContributedProjects = orgContributedProjects.Replace("|", "\\|");
+                otherContributedProjects = otherContributedProjects.Replace("|", "\\|");
                 
-                sb.AppendLine($"| {rank} | {totalInfluence} | {developerInfo} | {followers} | {personalProjects} | {contributedProjects} |");
+                sb.AppendLine($"| {rank} | {totalInfluence} | {developerInfo} | {followers} | {personalProjects} | {orgContributedProjects} | {otherContributedProjects} |");
             }
             
             return sb.ToString();
@@ -939,7 +1073,7 @@ namespace TaiwanPopularDevelopers
             sb.AppendLine("<h1>台灣知名GitHub用戶排名</h1>");
             sb.AppendLine($"<p style='text-align:center;'>更新時間: {DateTime.Now:yyyy-MM-dd HH:mm:ss}｜總計用戶數: {users.Count}</p>");
             sb.AppendLine("<table>");
-            sb.AppendLine("<tr><th>Badge</th><th>排名</th><th>開發者</th><th>Followers</th><th>Personal Projects</th><th>Top Contributed Projects</th></tr>");
+            sb.AppendLine("<tr><th>Badge</th><th>排名</th><th>開發者</th><th>Followers</th><th>Personal Projects</th><th>Top Org Projects</th><th>Top Contributed Projects</th></tr>");
             for (int i = 0; i < users.Count; i++)
             {
                 var user = users[i];
@@ -978,7 +1112,21 @@ namespace TaiwanPopularDevelopers
                         if (j < topOrgRepos.Count - 1) contributedProjects += "<br/>";
                     }
                 }
-                sb.AppendLine($"<tr><td>{badgeHtml}</td><td>{rank}</td><td>{developerInfo}</td><td>{followers}</td><td>{personalProjects}</td><td>{contributedProjects}</td></tr>");
+                var otherContributedProjects = "-";
+                if (user.TopContributedRepositories.Any())
+                {
+                    var totalContribStars = user.TopContributedRepositories.Sum(r => r.StargazersCount);
+                    var totalContribForks = user.TopContributedRepositories.Sum(r => r.ForksCount);
+                    otherContributedProjects = $"⭐ {totalContribStars:N0} 🍴 {totalContribForks:N0}<br/>";
+                    var topContribRepos = user.TopContributedRepositories.Take(3).ToList();
+                    for (int j = 0; j < topContribRepos.Count; j++)
+                    {
+                        var repo = topContribRepos[j];
+                        otherContributedProjects += $"• <a href='{repo.HtmlUrl}' target='_blank'>{repo.Name}</a> ({repo.StargazersCount:N0}⭐)";
+                        if (j < topContribRepos.Count - 1) otherContributedProjects += "<br/>";
+                    }
+                }
+                sb.AppendLine($"<tr><td>{badgeHtml}</td><td>{rank}</td><td>{developerInfo}</td><td>{followers}</td><td>{personalProjects}</td><td>{contributedProjects}</td><td>{otherContributedProjects}</td></tr>");
             }
             sb.AppendLine("</table>");
             sb.AppendLine("<p style='text-align:center;color:#888;'>點擊 badge 可複製 badge 連結，可用於個人 README 或其他地方展示。</p>");
