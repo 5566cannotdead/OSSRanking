@@ -116,4 +116,4 @@ dotnet run
 
 ## 授權
 
-本專案採用MIT授權條款。 
+本專案採用[MIT授權條款](/LICENSE)。
